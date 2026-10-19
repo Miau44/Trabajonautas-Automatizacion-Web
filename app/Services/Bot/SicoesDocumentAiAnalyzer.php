@@ -292,7 +292,8 @@ Devuelve exclusivamente JSON valido con esta estructura exacta:
   "cargos": [
     {
       "nombre": "",
-      "evidencia": ""
+      "evidencia": "",
+      "profesiones": [""]
     }
   ],
   "profesiones_encontradas": [
@@ -369,6 +370,7 @@ Clasificacion obligatoria:
 Reglas de datos:
 - CUCE: extrae del documento solo si aparece explicitamente. La fila SICOES es la fuente primaria y Laravel comparara ambos valores.
 - Profesiones: conserva nombre_original exactamente como aparece y una evidencia que contenga ese requisito. nombre_catalogo debe ser un nombre literal del catalogo o una cadena vacia.
+- Cargos: si hay varios cargos realmente diferentes, incluye en cada cargo las profesiones que lo habilitan usando exactamente sus valores nombre_original. Una lista de profesiones alternativas para un mismo cargo no convierte esas profesiones en cargos separados.
 - tipo_requisito debe ser obligatoria, alternativa o deseable. confianza debe estar entre 0 y 1.
 - No dupliques una profesion equivalente; conserva la evidencia mas clara.
 - Si aparece "carreras afines" o equivalente, activa acepta_carreras_afines y copia la frase en evidencia_carreras_afines. No agregues por tu cuenta todas las profesiones del area.
@@ -1013,6 +1015,12 @@ PROMPT;
             ->map(fn (array $role): array => [
                 'nombre' => $this->text($role['nombre'] ?? ''),
                 'evidencia' => $this->text($role['evidencia'] ?? ''),
+                'profesiones' => collect(is_array($role['profesiones'] ?? null) ? $role['profesiones'] : [])
+                    ->map(fn (mixed $profession): string => $this->text($profession))
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all(),
             ])
             ->filter(fn (array $role): bool => $role['nombre'] !== '')
             ->values()

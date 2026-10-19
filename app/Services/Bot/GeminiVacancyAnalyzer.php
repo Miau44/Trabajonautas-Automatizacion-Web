@@ -19,15 +19,17 @@ class GeminiVacancyAnalyzer
 
     public function analyzeWithMeta(string $title, BotCompany|string $company, string $description, array $options = []): array
     {
-        $key = config('services.gemini.key');
-        $model = trim((string) config('services.gemini.model', 'gemini-2.5-flash-lite'));
+        // Keep legacy class and metadata names for saved-preview compatibility.
+        // New Evaluar and E-Talent analyses are sent exclusively to Claude.
+        $key = config('services.anthropic.api_key');
+        $model = trim((string) config('services.anthropic.model', 'claude-haiku-4-5-20251001'));
         $companyName = $company instanceof BotCompany ? $company->name : $company;
         $preparedDescription = $this->prepareDescription($description);
 
         if (! preg_match('/^[A-Za-z0-9._-]{1,100}$/', $model)) {
             return $this->metaError(
                 errorType: 'invalid_configuration',
-                error: 'GEMINI_MODEL contiene un valor no permitido.',
+                error: 'ANTHROPIC_MODEL contiene un valor no permitido.',
                 used: false,
                 model: 'invalid',
                 extra: $preparedDescription['meta'],
@@ -37,7 +39,7 @@ class GeminiVacancyAnalyzer
         if (! empty($options['skip_due_to_quota'])) {
             return $this->metaError(
                 errorType: 'quota_exceeded_skipped',
-                error: 'Gemini quota excedida en este batch; se usó fallback.',
+                error: 'Se alcanzó el límite de Claude en este lote; se usaron valores de respaldo.',
                 used: false,
                 model: $model,
                 extra: [
@@ -50,7 +52,7 @@ class GeminiVacancyAnalyzer
         if (! $key) {
             return $this->metaError(
                 errorType: 'missing_api_key',
-                error: 'GEMINI_API_KEY no configurada',
+                error: 'ANTHROPIC_API_KEY no configurada',
                 used: false,
                 model: $model,
                 extra: $preparedDescription['meta'],
@@ -121,17 +123,17 @@ class GeminiVacancyAnalyzer
                 );
             }
 
-            $text = data_get($responseJson, 'candidates.0.content.parts.0.text');
+            $text = data_get($responseJson, 'content.0.text');
             if (! $text) {
                 return $this->metaError(
                     errorType: 'invalid_json',
-                    error: 'Gemini devolvió una respuesta vacía.',
+                    error: 'Claude devolvió una respuesta vacía.',
                     used: true,
                     model: $model,
                     httpStatus: $response->status(),
                     extra: [
                         'gemini_attempts' => $attempts,
-                        'gemini_finish_reason' => data_get($responseJson, 'candidates.0.finishReason'),
+                        'gemini_finish_reason' => data_get($responseJson, 'stop_reason'),
                         ...$usageMetadata,
                         ...$preparedDescription['meta'],
                     ],
@@ -142,13 +144,13 @@ class GeminiVacancyAnalyzer
             if (! is_array($decoded)) {
                 return $this->metaError(
                     errorType: 'invalid_json',
-                    error: 'Gemini respondió, pero el JSON no se pudo interpretar.',
+                    error: 'Claude respondió, pero el JSON no se pudo interpretar.',
                     used: true,
                     model: $model,
                     httpStatus: $response->status(),
                     extra: [
                         'gemini_attempts' => $attempts,
-                        'gemini_finish_reason' => data_get($responseJson, 'candidates.0.finishReason'),
+                        'gemini_finish_reason' => data_get($responseJson, 'stop_reason'),
                         'gemini_json_error' => SensitiveDataSanitizer::text(json_last_error_msg(), 120),
                         'gemini_response_metadata' => SensitiveDataSanitizer::payloadMetadata($text),
                         ...$usageMetadata,
@@ -162,13 +164,13 @@ class GeminiVacancyAnalyzer
             if ($validationErrors !== []) {
                 return $this->metaError(
                     errorType: 'invalid_schema',
-                    error: 'Gemini devolvió un JSON que no cumple el contrato de clasificación.',
+                    error: 'Claude devolvió un JSON que no cumple el contrato de clasificación.',
                     used: true,
                     model: $model,
                     httpStatus: $response->status(),
                     extra: [
                         'gemini_attempts' => $attempts,
-                        'gemini_finish_reason' => data_get($responseJson, 'candidates.0.finishReason'),
+                        'gemini_finish_reason' => data_get($responseJson, 'stop_reason'),
                         'gemini_validation_errors' => $validationErrors,
                         'gemini_response_metadata' => SensitiveDataSanitizer::payloadMetadata($text),
                         ...$usageMetadata,
@@ -187,7 +189,7 @@ class GeminiVacancyAnalyzer
                 'http_status' => $response->status(),
                 'gemini_response_metadata' => SensitiveDataSanitizer::payloadMetadata($text),
                 'gemini_attempts' => $attempts,
-                'gemini_finish_reason' => data_get($responseJson, 'candidates.0.finishReason'),
+                'gemini_finish_reason' => data_get($responseJson, 'stop_reason'),
                 'analyzed_at' => now()->toIso8601String(),
                 'prompt_version' => (string) config('profession_matching.prompt_version'),
                 ...$usageMetadata,
@@ -213,42 +215,31 @@ class GeminiVacancyAnalyzer
     private function sendRequest(string $model, string $key, string $title, string $companyName, string $description)
     {
         $verify = TlsVerification::option(
-            'Gemini',
-            (bool) config('services.gemini.verify_ssl', true),
-            config('services.gemini.ca_bundle'),
+            'Claude',
+            (bool) config('services.anthropic.verify_ssl', true),
+            config('services.anthropic.ca_bundle'),
         );
-        $generationConfig = [
-            'temperature' => 0,
-            'responseMimeType' => 'application/json',
-            'responseSchema' => $this->responseSchema(),
-            'maxOutputTokens' => (int) config('services.gemini.max_output_tokens', 1024),
-        ];
 
-        if (Str::startsWith($model, 'gemini-2.5-flash')) {
-            $generationConfig['thinkingConfig'] = [
-                'thinkingBudget' => 0,
-            ];
-        }
-
-        return Http::connectTimeout((int) config('services.gemini.connect_timeout', 10))
-            ->timeout((int) config('services.gemini.timeout', 60))
+        return Http::connectTimeout((int) config('services.anthropic.connect_timeout', 10))
+            ->timeout((int) config('services.anthropic.timeout', 60))
             ->withHeaders([
                 'Content-Type' => 'application/json',
-                'x-goog-api-key' => $key,
+                'x-api-key' => $key,
+                'anthropic-version' => config('services.anthropic.version', '2023-06-01'),
             ])
             ->withOptions([
                 'verify' => $verify,
                 'allow_redirects' => false,
             ])
-            ->post('https://generativelanguage.googleapis.com/v1beta/models/'.rawurlencode($model).':generateContent', [
-                'contents' => [
-                    [
-                        'parts' => [
-                            ['text' => $this->prompt($title, $companyName, $description)],
-                        ],
-                    ],
-                ],
-                'generationConfig' => $generationConfig,
+            ->post('https://api.anthropic.com/v1/messages', [
+                'model' => $model,
+                'max_tokens' => (int) config('services.anthropic.max_tokens', 2048),
+                'temperature' => 0,
+                'system' => 'Analiza convocatorias laborales y responde exclusivamente con el JSON solicitado, sin texto adicional.',
+                'messages' => [[
+                    'role' => 'user',
+                    'content' => $this->prompt($title, $companyName, $description),
+                ]],
             ]);
     }
 
@@ -347,7 +338,7 @@ class GeminiVacancyAnalyzer
     {
         if (
             $type !== 'ssl_error'
-            || ! (bool) config('services.gemini.debug_ssl', false)
+            || ! (bool) config('services.anthropic.debug_ssl', false)
             || ! app()->environment('local', 'testing')
         ) {
             return [];
@@ -360,8 +351,8 @@ class GeminiVacancyAnalyzer
             'gemini_ssl_diagnostics' => [
                 'exception_type' => Str::limit($exceptionType, 100, ''),
                 'curl_error_code' => isset($matches[1]) ? (int) $matches[1] : null,
-                'verify_ssl' => (bool) config('services.gemini.verify_ssl', true),
-                'ca_bundle_configured' => trim((string) config('services.gemini.ca_bundle')) !== '',
+                'verify_ssl' => (bool) config('services.anthropic.verify_ssl', true),
+                'ca_bundle_configured' => trim((string) config('services.anthropic.ca_bundle')) !== '',
             ],
         ];
     }
@@ -415,7 +406,7 @@ class GeminiVacancyAnalyzer
 
     private function prepareDescription(string $description): array
     {
-        $max = (int) config('services.gemini.max_description_chars', 6000);
+        $max = (int) config('services.anthropic.max_description_chars', 6000);
         $max = $max > 0 ? $max : 6000;
         $length = mb_strlen($description);
         $truncated = $length > $max;
@@ -433,7 +424,7 @@ class GeminiVacancyAnalyzer
 
     private function usageMetadata(?array $response): array
     {
-        $usage = data_get($response, 'usageMetadata');
+        $usage = data_get($response, 'usage');
 
         if (! is_array($usage)) {
             return [
@@ -447,10 +438,10 @@ class GeminiVacancyAnalyzer
 
         return [
             'usage_metadata' => $usage,
-            'prompt_tokens' => data_get($usage, 'promptTokenCount'),
-            'candidates_tokens' => data_get($usage, 'candidatesTokenCount'),
-            'total_tokens' => data_get($usage, 'totalTokenCount'),
-            'thoughts_tokens' => data_get($usage, 'thoughtsTokenCount'),
+            'prompt_tokens' => data_get($usage, 'input_tokens'),
+            'candidates_tokens' => data_get($usage, 'output_tokens'),
+            'total_tokens' => (int) data_get($usage, 'input_tokens', 0) + (int) data_get($usage, 'output_tokens', 0),
+            'thoughts_tokens' => null,
         ];
     }
 
@@ -491,7 +482,7 @@ class GeminiVacancyAnalyzer
         }
 
         return SensitiveDataSanitizer::text($exception->getMessage(), 300)
-            ?: 'Error al conectar con Gemini.';
+            ?: 'Error al conectar con Claude.';
     }
 
     private function prompt(string $title, string $company, string $description): string
@@ -857,7 +848,8 @@ PROMPT;
 
     private function httpError(int $status, string $body): string
     {
-        $message = data_get(json_decode($body, true), 'error.message');
+        $decoded = json_decode($body, true);
+        $message = data_get($decoded, 'error.message') ?: data_get($decoded, 'message');
         $message = $message ? SensitiveDataSanitizer::text(strip_tags((string) $message), 220) : null;
 
         return trim("HTTP {$status}".($message ? ": {$message}" : ''));

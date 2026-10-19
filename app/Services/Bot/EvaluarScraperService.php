@@ -49,8 +49,8 @@ class EvaluarScraperService
             'already_previewed' => 0,
             'reactivated_deleted' => 0,
             'removed_from_batch' => 0,
-            'gemini_enabled' => (bool) config('services.gemini.key'),
-            'gemini_model' => config('services.gemini.model', 'gemini-2.5-flash-lite'),
+            'gemini_enabled' => (bool) config('services.anthropic.api_key'),
+            'gemini_model' => config('services.anthropic.model', 'claude-haiku-4-5-20251001'),
             'gemini_errors' => 0,
             'gemini_calls' => 0,
             'gemini_skipped_existing_preview' => 0,
@@ -970,7 +970,7 @@ class EvaluarScraperService
         $reviewReasons = array_values(array_unique(array_filter([
             ($gemini['success'] ?? false)
                 ? null
-                : ($gemini['error'] ?? 'Gemini no pudo analizar la convocatoria.'),
+                : ($gemini['error'] ?? 'Claude no pudo analizar la convocatoria.'),
             ...($resolution['motivos_revision'] ?? []),
             $locationMissing ? $missingLocationReason : null,
         ])));
@@ -997,7 +997,7 @@ class EvaluarScraperService
             'salary_detected_text' => $normalizedFields['salary_detected_text'],
             'gemini_used' => (bool) ($gemini['used'] ?? false),
             'gemini_success' => (bool) ($gemini['success'] ?? false),
-            'gemini_model' => $gemini['model'] ?? config('services.gemini.model', 'gemini-2.5-flash-lite'),
+            'gemini_model' => $gemini['model'] ?? config('services.anthropic.model', 'claude-haiku-4-5-20251001'),
             'gemini_error' => $gemini['error'] ?? null,
             'gemini_error_type' => $gemini['error_type'] ?? null,
             'gemini_http_status' => $gemini['http_status'] ?? null,
@@ -1235,7 +1235,7 @@ class EvaluarScraperService
 
     private function logGeminiDecision(BotCompany $company, string $title, string $status, array $context = []): void
     {
-        Log::info('BOT Gemini analysis decision', SensitiveDataSanitizer::context([
+        Log::info('BOT Claude analysis decision', SensitiveDataSanitizer::context([
             'company' => $company->name,
             'title' => Str::limit($title, 120, ''),
             'status' => $status,
