@@ -120,8 +120,14 @@ final class BotUiLabels
             $issues->push('La clasificación automática requiere revisión manual.');
         }
 
+        $usesAnthropic = self::normalize(data_get($rawData, 'source')) === 'sicoes'
+            || self::normalize(data_get($rawData, 'ai_provider')) === 'anthropic';
+
         return $issues
             ->map(fn (string $issue): string => trim($issue))
+            ->map(fn (string $issue): string => $usesAnthropic
+                ? str_ireplace('Gemini', 'Claude', $issue)
+                : $issue)
             ->filter()
             ->unique(fn (string $issue): string => self::normalize($issue))
             ->values()

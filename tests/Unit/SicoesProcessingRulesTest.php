@@ -115,6 +115,46 @@ class SicoesProcessingRulesTest extends TestCase
         $this->assertSame(660, $method->invoke($runner, true));
     }
 
+    public function test_runner_accepts_an_explicitly_allowed_empty_final_file(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'sicoes-empty-');
+        file_put_contents($path, json_encode([
+            'fecha' => '27/08/2026',
+            'total_fichas' => 0,
+            'fichas_finales' => [],
+        ], JSON_THROW_ON_ERROR));
+
+        try {
+            $method = new ReflectionMethod(SicoesRunnerService::class, 'validatedFinalItems');
+            $method->setAccessible(true);
+
+            $this->assertSame([], $method->invoke(new SicoesRunnerService, $path, true));
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_runner_rejects_an_unexpected_empty_final_file(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'sicoes-empty-');
+        file_put_contents($path, json_encode([
+            'fecha' => '27/08/2026',
+            'total_fichas' => 0,
+            'fichas_finales' => [],
+        ], JSON_THROW_ON_ERROR));
+
+        try {
+            $method = new ReflectionMethod(SicoesRunnerService::class, 'validatedFinalItems');
+            $method->setAccessible(true);
+
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('JSON final vacio');
+            $method->invoke(new SicoesRunnerService, $path);
+        } finally {
+            @unlink($path);
+        }
+    }
+
     #[DataProvider('expirationCases')]
     public function test_sicoes_expiration_preserves_real_time_and_controls_invalid_values(
         string $source,

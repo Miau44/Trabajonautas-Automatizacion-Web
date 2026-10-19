@@ -15,8 +15,7 @@ class SicoesRunnerService
         ?callable $onItem = null,
         ?callable $onProgress = null,
         string $sourceType = 'consulting_services',
-    ): array
-    {
+    ): array {
         $displayDate = $this->displayDate($date);
         $dateSlug = str_replace('/', '-', $displayDate);
         $slug = $sourceType === 'personnel_requirements' ? $dateSlug.'-personal' : $dateSlug;
@@ -130,7 +129,10 @@ class SicoesRunnerService
             throw new \RuntimeException("SICOES no genero JSON final valido: {$jsonPath}");
         }
 
-        $items = $this->validatedFinalItems($jsonPath);
+        $items = $this->validatedFinalItems(
+            $jsonPath,
+            allowEmpty: str_contains($output, '[SICOES_EMPTY] '),
+        );
 
         return [
             'status' => str_contains($output, '[SICOES_PARTIAL] ') ? 'PARTIAL' : 'OK',
@@ -139,6 +141,7 @@ class SicoesRunnerService
             'source_type' => $sourceType,
             'json_path' => $jsonPath,
             'sicoes_items' => count($items),
+            'no_results' => count($items) === 0,
             'runner_output' => SensitiveDataSanitizer::text($output, 3000),
         ];
     }
@@ -359,7 +362,7 @@ class SicoesRunnerService
             : null;
     }
 
-    private function validatedFinalItems(string $jsonPath): array
+    private function validatedFinalItems(string $jsonPath, bool $allowEmpty = false): array
     {
         $decoded = json_decode(file_get_contents($jsonPath) ?: '', true);
 
@@ -371,7 +374,7 @@ class SicoesRunnerService
             ? $decoded['fichas_finales']
             : (array_is_list($decoded) ? $decoded : []);
 
-        if (count($items) === 0) {
+        if (count($items) === 0 && ! $allowEmpty) {
             throw new \RuntimeException("SICOES genero JSON final vacio. No se importara: {$jsonPath}");
         }
 

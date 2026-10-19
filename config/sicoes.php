@@ -58,10 +58,6 @@ return [
             32 * 1024 * 1024,
             max(1024, (int) env('SICOES_AI_MAX_VISUAL_PDF_BYTES', 20 * 1024 * 1024)),
         ),
-        'use_gemini_validation' => filter_var(
-            env('SICOES_USE_GEMINI_VALIDATION', false),
-            FILTER_VALIDATE_BOOLEAN,
-        ),
     ],
 
     'location' => [

@@ -3,13 +3,12 @@
 namespace Tests\Unit;
 
 use App\Services\Bot\SicoesDocumentImporterService;
-use ReflectionClass;
 use ReflectionMethod;
 use Tests\TestCase;
 
 class SicoesDocumentImporterVariantTest extends TestCase
 {
-    public function test_multiple_individual_document_is_split_into_publishable_area_variants(): void
+    public function test_multiple_individual_document_is_split_by_roles_and_each_role_keeps_its_professions(): void
     {
         $variants = $this->variants([
             'profesiones_resueltas' => [
@@ -30,7 +29,16 @@ class SicoesDocumentImporterVariantTest extends TestCase
             'profession_ids' => [84, 228, 161],
         ], [
             'contract_type' => 'multiple_individual',
-            'cargos' => [['nombre' => 'Ambiental'], ['nombre' => 'Civil']],
+            'cargos' => [
+                [
+                    'nombre' => 'Ambiental',
+                    'profesiones' => ['Ingenieria Ambiental', 'Ingenieria Forestal'],
+                ],
+                [
+                    'nombre' => 'Civil',
+                    'profesiones' => ['Civil y Construcciones Civiles'],
+                ],
+            ],
         ]);
 
         $this->assertCount(2, $variants);
@@ -65,7 +73,7 @@ class SicoesDocumentImporterVariantTest extends TestCase
 
     private function variants(array $resolution, array $analysis): array
     {
-        $service = (new ReflectionClass(SicoesDocumentImporterService::class))->newInstanceWithoutConstructor();
+        $service = app(SicoesDocumentImporterService::class);
         $method = new ReflectionMethod(SicoesDocumentImporterService::class, 'professionPreviewVariants');
 
         return $method->invoke($service, $resolution, $analysis);
@@ -76,6 +84,8 @@ class SicoesDocumentImporterVariantTest extends TestCase
         return [
             'profesion_id' => $id,
             'profesion_name' => $name,
+            'nombre_original' => $name,
+            'nombres_originales' => [$name],
             'area_ids' => [$areaId],
             'areas' => [['area_id' => $areaId, 'area_name' => $areaName]],
         ];

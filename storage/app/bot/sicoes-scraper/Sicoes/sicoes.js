@@ -895,7 +895,13 @@ function buscarPdfToText() {
 
   for (const candidate of candidates) {
     const check = spawnSync(candidate, ['-v'], { encoding: 'utf8', shell: false });
-    if (!check.error && check.status === 0) return candidate;
+    const versionOutput = `${check.stdout || ''}\n${check.stderr || ''}`;
+    const reportedVersion = /pdftotext\s+version/i.test(versionOutput);
+
+    // Xpdf usa 99 para mostrar la versión aunque el ejecutable sea válido.
+    // Aceptamos el código no cero solamente cuando la salida identifica
+    // inequívocamente a pdftotext, para no confundir otros fallos de ejecución.
+    if (!check.error && (check.status === 0 || reportedVersion)) return candidate;
   }
 
   return null;
@@ -4168,10 +4174,12 @@ function fichaFinalValida(ficha) {
   );
 }
 
-function validarFichasFinales(fichasFinales, contexto = 'SICOES', phaseNumber = 7) {
+function validarFichasFinales(fichasFinales, contexto = 'SICOES', phaseNumber = 7, allowEmpty = false) {
   const items = Array.isArray(fichasFinales?.fichas_finales) ? fichasFinales.fichas_finales : [];
 
   if (!items.length) {
+    if (allowEmpty) return;
+
     throw phaseFail(phaseNumber, `${contexto}: JSON final vacio. No hay fichas_finales importables.`);
   }
 
@@ -6695,7 +6703,12 @@ async function procesarWords(fecha, slug, convocatorias, inputDir, options = {})
   const legacyFichasFinalesPath = path.join(UNIFICADOS_DIR, `fichas-finales-${slug}.json`);
   const fichaFinalVisiblePath = path.join(FICHAS_FINALES_DIR, `${slug}.json`);
   const fichasFinales = await generarFichasFinales(unificado);
-  validarFichasFinales(fichasFinales, `SICOES ${fecha}`);
+  const todosDescartadosCorrectamente = convocatorias.length > 0 &&
+    resultados.length === 0 &&
+    totalProcesados === convocatorias.length &&
+    excluidas.length === convocatorias.length;
+
+  validarFichasFinales(fichasFinales, `SICOES ${fecha}`, 7, todosDescartadosCorrectamente);
 
   writeRequiredFinalFile(fichaFinalVisiblePath, JSON.stringify(fichasFinales, null, 2), 'utf8');
   if (fs.existsSync(legacyFichasFinalesPath)) {
@@ -6703,6 +6716,16 @@ async function procesarWords(fecha, slug, convocatorias, inputDir, options = {})
       fs.unlinkSync(legacyFichasFinalesPath);
     } catch (_) {}
   }
+
+  if (todosDescartadosCorrectamente) {
+    console.log(`[SICOES_EMPTY] ${JSON.stringify({
+      date: fecha,
+      total: convocatorias.length,
+      excluded: excluidas.length,
+      reason: 'all_documents_discarded',
+    })}`);
+  }
+
   phaseOk(7, `JSON generado con ${fichasFinales.fichas_finales.length} fichas en ${fichaFinalVisiblePath}`);
 
   writeAuxFileSafe(unificadoPath, JSON.stringify(unificado, null, 2), 'utf8');
@@ -6826,6 +6849,7 @@ async function procesarWords(fecha, slug, convocatorias, inputDir, options = {})
     excluidasPath,
     unificado,
     fichasFinales,
+    noResults: todosDescartadosCorrectamente,
   };
 }
 
@@ -6866,7 +6890,7 @@ async function ejecutarPipelineFull(fecha, slug, inputDir, convocatoriasPath, op
     throw phaseFail(7, `No se genero el JSON final esperado: ${resultado.fichaFinalVisiblePath}`);
   }
 
-  validarFichasFinales(resultado.fichasFinales, `SICOES ${fecha}`);
+  validarFichasFinales(resultado.fichasFinales, `SICOES ${fecha}`, 7, resultado.noResults);
 
   if (descargasFallidas > 0) {
     console.log(`[SICOES_PARTIAL] ${JSON.stringify({

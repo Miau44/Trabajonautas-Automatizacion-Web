@@ -23,9 +23,9 @@ use Symfony\Component\Process\Process;
 
 class SicoesDocumentImporterService
 {
-    private const ANALYSIS_SCHEMA_VERSION = 'sicoes-document-v3-2026-07-28';
+    private const ANALYSIS_SCHEMA_VERSION = 'sicoes-document-v4-2026-08-31';
 
-    private const PROMPT_VERSION = 'sicoes-professions-location-v2-2026-07-28';
+    private const PROMPT_VERSION = 'sicoes-professions-multiarea-v3-2026-08-31';
 
     public function __construct(
         private SicoesDocumentAiAnalyzer $analyzer,
@@ -431,6 +431,7 @@ class SicoesDocumentImporterService
             $data['area_principal_catalogo'] ?? null,
             (float) ($data['confianza_area_principal'] ?? 0),
             $data['evidencia_area_principal'] ?? null,
+            aiProviderLabel: 'Claude',
         );
         $professionVariants = $this->professionPreviewVariants($professionResolution, $data);
         $primaryProfessionVariant = $professionVariants[0] ?? null;
@@ -590,6 +591,7 @@ class SicoesDocumentImporterService
                 'matched_profession_ids' => $professionResolution['profession_ids'] ?? [],
                 'multi_preview_split' => $primaryProfessionVariant !== null,
                 'preview_variant_area_id' => $primaryProfessionVariant['area_id'] ?? null,
+                'preview_variant_role' => $primaryProfessionVariant['role_name'] ?? null,
                 'preview_variant_index' => $primaryProfessionVariant ? 1 : null,
                 'preview_variant_count' => $primaryProfessionVariant ? count($professionVariants) : 1,
                 'municipality' => $location['municipio'],
@@ -645,7 +647,7 @@ class SicoesDocumentImporterService
 
         $additionalPreviews = [];
         foreach (array_slice($professionVariants, 1) as $variantIndex => $variant) {
-            $variantDocument = $this->professionVariantDocument($document, (int) $variant['area_id']);
+            $variantDocument = $this->professionVariantDocument($document, (string) $variant['variant_key']);
             $variantSourceUrl = $this->documentSourceUrl($variantDocument);
             $variantSourceHash = hash('sha256', $variantSourceUrl);
             $variantResolution = $variant['resolution'];
@@ -686,6 +688,7 @@ class SicoesDocumentImporterService
                 ],
                 'multi_preview_split' => true,
                 'preview_variant_area_id' => $variant['area_id'],
+                'preview_variant_role' => $variant['role_name'],
                 'preview_variant_index' => $variantIndex + 2,
                 'preview_variant_count' => count($professionVariants),
             ]);
@@ -1957,18 +1960,14 @@ class SicoesDocumentImporterService
 
     private function professionPreviewVariants(array $resolution, array $analysis): array
     {
-        $groups = array_values(array_filter(
-            (array) ($resolution['areas_detectadas'] ?? []),
-            fn (mixed $group): bool => is_array($group)
-                && (int) ($group['area_id'] ?? 0) > 0
-                && (array) ($group['profesion_ids'] ?? []) !== [],
-        ));
-        $hasMultipleRoles = ($analysis['contract_type'] ?? null) === 'multiple_individual'
-            || count((array) ($analysis['cargos'] ?? [])) > 1;
+        $roles = collect((array) ($analysis['cargos'] ?? []))
+            ->filter(fn (mixed $role): bool => is_array($role)
+                && trim((string) ($role['nombre'] ?? '')) !== ''
+                && (array) ($role['profesiones'] ?? []) !== [])
+            ->values();
 
         if (
-            ! $hasMultipleRoles
-            || count($groups) < 2
+            $roles->count() < 2
             || (array) ($resolution['profesiones_no_identificadas'] ?? []) !== []
             || (array) ($resolution['profesiones_ambiguas'] ?? []) !== []
         ) {
@@ -1978,108 +1977,118 @@ class SicoesDocumentImporterService
         $resolved = collect((array) ($resolution['profesiones_resueltas'] ?? []))
             ->filter(fn (mixed $profession): bool => is_array($profession) && (int) ($profession['profesion_id'] ?? 0) > 0)
             ->keyBy(fn (array $profession): int => (int) $profession['profesion_id']);
-        $assignedIds = [];
+        $allProfessionIds = $resolved->keys()->map(fn (mixed $id): int => (int) $id)->sort()->values();
+        $assignedProfessionIds = collect();
+        $roleAssignments = [];
 
-        foreach ($groups as $group) {
-            foreach (array_unique(array_map('intval', (array) $group['profesion_ids'])) as $professionId) {
-                if (isset($assignedIds[$professionId]) || ! $resolved->has($professionId)) {
-                    return [];
-                }
+        foreach ($roles as $index => $role) {
+            $references = collect((array) ($role['profesiones'] ?? []))
+                ->map(fn (mixed $name): string => $this->normalize((string) $name))
+                ->filter()
+                ->unique();
+            $professionIds = $resolved
+                ->filter(function (array $profession) use ($references): bool {
+                    $names = collect([
+                        $profession['nombre_original'] ?? null,
+                        $profession['nombre_catalogo_ia'] ?? null,
+                        $profession['profesion_name'] ?? null,
+                        ...((array) ($profession['nombres_originales'] ?? [])),
+                    ])->filter()->map(fn (mixed $name): string => $this->normalize((string) $name))->unique();
 
-                $assignedIds[$professionId] = true;
+                    return $references->intersect($names)->isNotEmpty();
+                })
+                ->keys()
+                ->map(fn (mixed $id): int => (int) $id)
+                ->values();
+
+            if ($professionIds->isEmpty()) {
+                return [];
             }
+
+            $assignedProfessionIds = $assignedProfessionIds->merge($professionIds);
+            $roleAssignments[] = [
+                'role_index' => $index + 1,
+                'role_name' => trim((string) $role['nombre']),
+                'profession_ids' => $professionIds->all(),
+            ];
         }
 
-        $allProfessionIds = collect((array) ($resolution['profession_ids'] ?? []))
-            ->map(fn (mixed $id): int => (int) $id)
-            ->filter()
-            ->unique()
-            ->sort()
-            ->values()
-            ->all();
-        $groupedProfessionIds = collect(array_keys($assignedIds))->sort()->values()->all();
-
-        if ($allProfessionIds === [] || $allProfessionIds !== $groupedProfessionIds) {
+        if ($assignedProfessionIds->unique()->sort()->values()->all() !== $allProfessionIds->all()) {
             return [];
         }
 
         $preservedReviewReasons = collect((array) ($resolution['motivos_revision'] ?? []))
-            ->filter(function (mixed $reason): bool {
-                $normalized = Str::lower(Str::ascii((string) $reason));
-
-                return ! str_contains($normalized, 'area principal')
-                    && ! str_contains($normalized, 'pertenecientes a varias areas');
-            })
+            ->reject(fn (mixed $reason): bool => $this->isAreaClassificationWarning((string) $reason))
             ->values()
             ->all();
 
-        return collect($groups)->map(function (array $group) use ($resolution, $resolved, $preservedReviewReasons): array {
-            $professionIds = collect((array) $group['profesion_ids'])
-                ->map(fn (mixed $id): int => (int) $id)
-                ->filter()
-                ->unique()
-                ->values()
-                ->all();
-            $resolvedProfessions = collect($professionIds)
+        return collect($roleAssignments)->map(function (array $role) use ($resolution, $resolved, $preservedReviewReasons): array {
+            $resolvedProfessions = collect($role['profession_ids'])
                 ->map(fn (int $id): ?array => $resolved->get($id))
                 ->filter()
                 ->values()
                 ->all();
-            $professionNames = collect($resolvedProfessions)
-                ->pluck('profesion_name')
-                ->filter()
-                ->unique()
-                ->values()
-                ->all();
-            $area = [
-                'area_id' => (int) $group['area_id'],
-                'area_name' => (string) $group['area_name'],
-                'porcentaje' => 1.0,
-            ];
+            $areaGroups = $this->professionAssignments->groupResolvedProfessionsByArea($resolvedProfessions);
+            $dominantArea = $this->professionAssignments->determineDominantArea($areaGroups);
+            $aiArea = data_get($resolution, 'area_principal_ia');
+            $areaIds = collect($areaGroups)->pluck('area_id')->map(fn (mixed $id): int => (int) $id)->values();
+            $selectedArea = $dominantArea;
+
+            if (! $selectedArea && is_array($aiArea) && $areaIds->contains((int) ($aiArea['area_id'] ?? 0))) {
+                $selectedArea = $aiArea;
+            }
+            $selectedArea ??= $areaGroups[0] ?? null;
+            $professionNames = collect($resolvedProfessions)->pluck('profesion_name')->filter()->unique()->values()->all();
             $variantResolution = array_merge($resolution, [
                 'profesiones_resueltas' => $resolvedProfessions,
-                'areas_detectadas' => [[
-                    ...$group,
-                    'profesion_ids' => $professionIds,
-                    'cantidad' => count($professionIds),
-                    'porcentaje' => 1.0,
-                ]],
-                'area_principal_ia' => null,
-                'area_dominante' => $area,
+                'areas_detectadas' => $areaGroups,
+                'area_dominante' => $dominantArea,
                 'requiere_revision' => $preservedReviewReasons !== [],
                 'motivos_revision' => $preservedReviewReasons,
-                'profession_ids' => $professionIds,
+                'profession_ids' => $role['profession_ids'],
                 'profession_names' => $professionNames,
-                'area_ids' => [(int) $group['area_id']],
-                'area_names' => [(string) $group['area_name']],
-                'selected_area_id' => (int) $group['area_id'],
-                'valid' => $professionIds !== [] && $preservedReviewReasons === [],
+                'area_ids' => $areaIds->all(),
+                'area_names' => collect($areaGroups)->pluck('area_name')->values()->all(),
+                'selected_area_id' => $selectedArea['area_id'] ?? null,
+                'valid' => $role['profession_ids'] !== [] && $preservedReviewReasons === [],
                 'error' => $preservedReviewReasons !== [] ? implode(' ', $preservedReviewReasons) : null,
             ]);
 
             return [
-                'area_id' => (int) $group['area_id'],
-                'area_name' => (string) $group['area_name'],
+                ...$role,
+                'variant_key' => $role['role_index'].'-'.$this->normalize($role['role_name']),
+                'area_id' => (int) ($selectedArea['area_id'] ?? 0),
+                'area_name' => (string) ($selectedArea['area_name'] ?? ''),
                 'resolution' => $variantResolution,
             ];
         })->values()->all();
     }
 
-    private function professionVariantDocument(array $document, int $areaId): array
+    private function professionVariantDocument(array $document, string $variantKey): array
     {
         $sourceDocumentId = (string) ($document['document_id'] ?? hash('sha256', serialize($document)));
 
         return [
             ...$document,
-            'document_id' => hash('sha256', $sourceDocumentId.'|profession-area|'.$areaId),
+            'document_id' => hash('sha256', $sourceDocumentId.'|profession-role|'.$variantKey),
         ];
     }
 
     private function professionVariantTitle(string $title, array $variant): string
     {
-        $areaName = trim((string) ($variant['area_name'] ?? ''));
+        $roleName = trim((string) ($variant['role_name'] ?? ''));
 
-        return Str::limit($areaName !== '' ? $title.' - '.$areaName : $title, 255, '');
+        return Str::limit($roleName !== '' ? $title.' - '.$roleName : $title, 255, '');
+    }
+
+    private function isAreaClassificationWarning(string $reason): bool
+    {
+        $normalized = $this->normalize($reason);
+
+        return str_contains($normalized, 'area principal')
+            || str_contains($normalized, 'varias areas')
+            || str_contains($normalized, 'area dominante')
+            || str_contains($normalized, 'confianza del area');
     }
 
     private function previewTitle(array $document, array $analysis): string

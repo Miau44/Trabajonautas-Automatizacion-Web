@@ -59,4 +59,20 @@ class BotUiLabelsTest extends TestCase
             'La convocatoria incluye profesiones pertenecientes a varias áreas sin un área dominante.',
         ], $issues);
     }
+
+    public function test_sicoes_legacy_gemini_reasons_are_displayed_as_claude(): void
+    {
+        $issues = BotUiLabels::previewIssues([
+            'source' => 'sicoes',
+            'motivos_revision' => [
+                'Gemini no detectó ninguna profesión explícita.',
+                'No se pudo resolver ninguna profesión contra el catálogo.',
+            ],
+        ]);
+
+        $this->assertSame([
+            'Claude no detectó ninguna profesión explícita.',
+            'No se pudo resolver ninguna profesión contra el catálogo.',
+        ], $issues);
+    }
 }

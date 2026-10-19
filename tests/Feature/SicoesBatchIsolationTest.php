@@ -8,6 +8,8 @@ use App\Models\Area;
 use App\Models\BotCompany;
 use App\Models\BotSource;
 use App\Models\BotVacancyPreview;
+use App\Models\Announcement;
+use App\Models\Company;
 use App\Models\CompanyType;
 use App\Models\Location;
 use App\Models\Profesion;
@@ -190,6 +192,18 @@ class SicoesBatchIsolationTest extends TestCase
         $response = $this->acceptedClaudeResponse();
         $payload = json_decode($response['content'][0]['text'], true);
         $payload['titulo_objeto'] = 'Equipo multidisciplinario';
+        $payload['cargos'] = [
+            [
+                'nombre' => 'Especialista Social',
+                'evidencia' => 'ITEM 1 Especialista Social',
+                'profesiones' => ['Especialista Social'],
+            ],
+            [
+                'nombre' => 'Ingeniero Civil',
+                'evidencia' => 'ITEM 2 Ingeniero Civil',
+                'profesiones' => ['Ingeniero Civil'],
+            ],
+        ];
         $payload['profesiones_encontradas'][] = [
             'nombre_original' => 'Ingeniero Civil',
             'nombre_catalogo' => 'Ingenieria Civil',
@@ -229,6 +243,74 @@ class SicoesBatchIsolationTest extends TestCase
             BotVacancyPreview::get()->pluck('selected_profession_ids')->all(),
         );
         $this->assertTrue(BotVacancyPreview::get()->every(fn (BotVacancyPreview $preview): bool => $preview->status === 'preview'));
+    }
+
+    public function test_gestor_social_keeps_four_cross_area_professions_in_one_publishable_preview(): void
+    {
+        $communicationArea = Area::create(['area_name' => 'Area COMUNICACION']);
+        $environmentalArea = Area::create(['area_name' => 'Area AMBIENTAL']);
+        $communication = Profesion::create(['profesion_name' => 'Comunicación Social']);
+        $environmental = Profesion::create(['profesion_name' => 'Ingeniería Ambiental']);
+        $sociology = Profesion::create(['profesion_name' => 'Sociología']);
+        $forestry = Profesion::create(['profesion_name' => 'Ingeniería Forestal']);
+        $communicationArea->profesions()->sync([$communication->id]);
+        $environmentalArea->profesions()->sync([$environmental->id, $forestry->id]);
+        $this->area->profesions()->attach($sociology->id);
+        $run = $this->writeRun(
+            cuce: '26-0291-07-1669140-1-2',
+            title: 'Gestor Social 5',
+            text: 'Formación en Comunicación Social, Ingeniería Ambiental, Sociología o Ingeniería Forestal.',
+        );
+        $response = $this->acceptedClaudeResponse();
+        $payload = json_decode($response['content'][0]['text'], true);
+        $payload['contract_type'] = 'individual';
+        $payload['titulo_objeto'] = 'Gestor Social 5';
+        $payload['cargos'] = [[
+            'nombre' => 'Gestor Social 5',
+            'evidencia' => 'Cargo: Gestor Social 5',
+            'profesiones' => [
+                'Comunicación Social',
+                'Ingeniería Ambiental',
+                'Sociología',
+                'Ingeniería Forestal',
+            ],
+        ]];
+        $payload['profesiones_encontradas'] = collect($payload['cargos'][0]['profesiones'])
+            ->map(fn (string $name): array => [
+                'nombre_original' => $name,
+                'nombre_catalogo' => $name,
+                'evidencia' => "Formación en {$name}.",
+                'tipo_requisito' => 'alternativa',
+                'confianza' => 0.98,
+            ])->all();
+        $payload['area_principal_catalogo'] = 'Area SOCIAL';
+        $payload['evidencia_area_principal'] = 'El cargo y las funciones son de gestión social.';
+        $payload['confianza_area_principal'] = 0.55;
+        $payload['cuce']['valor'] = '26-0291-07-1669140-1-2';
+        $payload['cuce']['evidencia'] = 'CUCE: 26-0291-07-1669140-1-2';
+        $response['content'][0]['text'] = json_encode($payload);
+        Http::fake([
+            'api.anthropic.com/v1/messages' => Http::response($response),
+        ]);
+        $batch = $this->batch('00000000-0000-4000-8000-000000000076');
+
+        $summary = app(SicoesDocumentImporterService::class)->importRun(
+            run: $run,
+            botCompanyId: $this->botCompany->id,
+            userId: 'test-user',
+            batchId: $batch->id,
+        );
+
+        $preview = BotVacancyPreview::query()->sole();
+        $this->assertSame(1, $summary['saved']);
+        $this->assertSame(1, $summary['shown_in_batch']);
+        $this->assertSame('preview', $preview->status);
+        $this->assertSame($this->area->id, $preview->selected_area_id);
+        $this->assertEqualsCanonicalizing(
+            [$communication->id, $environmental->id, $sociology->id, $forestry->id],
+            $preview->selected_profession_ids,
+        );
+        $this->assertFalse((bool) data_get($preview->raw_data, 'manual_review_required'));
     }
 
     public function test_strong_company_document_is_recorded_as_discarded_without_preview_or_ai_call(): void
@@ -565,6 +647,19 @@ class SicoesBatchIsolationTest extends TestCase
             ->assertSee('Con error');
     }
 
+    public function test_confirmations_use_embedded_dialogs_instead_of_browser_alerts(): void
+    {
+        $batch = $this->batch('00000000-0000-4000-8000-000000000078');
+        $preview = $this->preview('Vista con diálogo', 'https://example.test/dialog-preview');
+        $this->batchItem($batch, $preview, 'dialog-preview');
+        $html = $this->livewirePreview($batch->id)->html();
+
+        $this->assertStringContainsString('<dialog', $html);
+        $this->assertStringContainsString('openConfirmation', $html);
+        $this->assertStringNotContainsString('wire:confirm', $html);
+        $this->assertStringNotContainsString('Swal.fire', $html);
+    }
+
     public function test_error_preview_with_missing_location_can_be_opened_and_explains_the_failure(): void
     {
         $batch = $this->batch('00000000-0000-4000-8000-000000000073');
@@ -619,6 +714,157 @@ class SicoesBatchIsolationTest extends TestCase
         $this->assertSame('Santa Cruz', $failed->department);
         $this->assertSame('Santa Cruz', $failed->location);
         $this->assertSame('edited', $failed->status);
+    }
+
+    public function test_multiarea_classification_warning_can_be_published_anyway_with_all_professions(): void
+    {
+        $batch = $this->batch('00000000-0000-4000-8000-000000000074');
+        $environmentalArea = Area::create(['area_name' => 'Area AMBIENTAL']);
+        $environmentalProfession = Profesion::create(['profesion_name' => 'Ingeniería Ambiental']);
+        $environmentalArea->profesions()->sync([$environmentalProfession->id]);
+        $company = Company::create([
+            'company_name' => 'SICOES',
+            'company_type_id' => CompanyType::query()->value('id'),
+        ]);
+        $preview = $this->preview('Gestor Social 5', 'https://example.test/gestor-social-5');
+        $preview->update([
+            'status' => 'error',
+            'description' => '<p>Consultoría individual con perfil profesional.</p>',
+            'department' => 'Santa Cruz',
+            'location' => 'Santa Cruz',
+            'expiration_date' => '2099-09-09 23:59:00',
+            'salary' => '11076',
+            'selected_company_id' => $company->id,
+            'selected_area_id' => null,
+            'selected_profession_ids' => [$this->profession->id, $environmentalProfession->id],
+            'selected_location_ids' => [Location::where('location_name', 'Santa Cruz')->value('id')],
+            'raw_data' => [
+                'ai_success' => true,
+                'anthropic_success' => true,
+                'manual_review_reasons' => [
+                    'La confianza del área principal seleccionada por Claude es insuficiente.',
+                    'La convocatoria incluye profesiones pertenecientes a varias áreas sin un área dominante.',
+                ],
+                'profession_resolution' => [
+                    'profession_ids' => [$this->profession->id, $environmentalProfession->id],
+                    'area_ids' => [$this->area->id, $environmentalArea->id],
+                    'profesiones_no_identificadas' => [],
+                    'profesiones_ambiguas' => [],
+                    'motivos_revision' => [
+                        'La confianza del área principal seleccionada por Claude es insuficiente.',
+                        'La convocatoria incluye profesiones pertenecientes a varias áreas sin un área dominante.',
+                    ],
+                ],
+            ],
+        ]);
+        $this->batchItem($batch, $preview, 'gestor-social-5');
+
+        $this->livewirePreview($batch->id)
+            ->assertSee('Publicar de todas formas')
+            ->call('publishAnyway', $preview->id)
+            ->assertHasNoErrors()
+            ->assertSet('errorMessage', null);
+
+        $preview->refresh();
+        $announcement = Announcement::query()->sole();
+        $this->assertSame('published', $preview->status);
+        $this->assertTrue((bool) data_get($preview->raw_data, 'published_anyway'));
+        $this->assertEqualsCanonicalizing(
+            [$this->profession->id, $environmentalProfession->id],
+            $announcement->profesions()->pluck('profesions.id')->all(),
+        );
+    }
+
+    public function test_old_multiarea_preview_can_update_expiration_and_pro_without_reselecting_everything(): void
+    {
+        $batch = $this->batch('00000000-0000-4000-8000-000000000077');
+        $environmentalArea = Area::create(['area_name' => 'Area AMBIENTAL']);
+        $environmentalProfession = Profesion::create(['profesion_name' => 'Ingeniería Ambiental']);
+        $environmentalArea->profesions()->sync([$environmentalProfession->id]);
+        $company = Company::create([
+            'company_name' => 'SICOES',
+            'company_type_id' => CompanyType::query()->value('id'),
+        ]);
+        $preview = $this->preview('Gestor Social 5', 'https://example.test/gestor-social-edit');
+        $preview->update([
+            'status' => 'error',
+            'description' => '<p>Consultoría individual con perfil profesional.</p>',
+            'department' => 'Santa Cruz',
+            'location' => 'Santa Cruz',
+            'expiration_date' => '2099-09-09 23:59:00',
+            'salary' => '11076',
+            'selected_company_id' => $company->id,
+            'selected_area_id' => null,
+            'selected_profession_ids' => [$this->profession->id, $environmentalProfession->id],
+            'selected_location_ids' => [Location::where('location_name', 'Santa Cruz')->value('id')],
+            'is_pro' => false,
+            'raw_data' => [
+                'ai_success' => true,
+                'anthropic_success' => true,
+                'ai_analysis' => [
+                    'area_principal_catalogo' => 'Area SOCIAL',
+                ],
+                'profession_resolution' => [
+                    'profession_ids' => [$this->profession->id, $environmentalProfession->id],
+                    'area_ids' => [$this->area->id, $environmentalArea->id],
+                    'profesiones_no_identificadas' => [],
+                    'profesiones_ambiguas' => [],
+                    'motivos_revision' => [
+                        'La confianza del área principal seleccionada por Claude es insuficiente.',
+                        'La convocatoria incluye profesiones pertenecientes a varias áreas sin un área dominante.',
+                    ],
+                ],
+            ],
+        ]);
+        $this->batchItem($batch, $preview, 'gestor-social-edit');
+
+        $this->livewirePreview($batch->id)
+            ->call('edit', $preview->id)
+            ->assertSet('form.selected_area_id', $this->area->id)
+            ->set('form.selected_area_id', null)
+            ->set('form.expiration_date', '2099-10-15 18:30')
+            ->set('form.is_pro', true)
+            ->call('saveEdit')
+            ->assertHasNoErrors()
+            ->assertSet('showModal', false);
+
+        $preview->refresh();
+        $this->assertSame('2099-10-15 18:30:00', $preview->expiration_date);
+        $this->assertTrue($preview->is_pro);
+        $this->assertSame($this->area->id, $preview->selected_area_id);
+        $this->assertSame('edited', $preview->status);
+        $this->assertEqualsCanonicalizing(
+            [$this->profession->id, $environmentalProfession->id],
+            $preview->selected_profession_ids,
+        );
+    }
+
+    public function test_technical_ai_error_does_not_offer_or_allow_publish_anyway(): void
+    {
+        $batch = $this->batch('00000000-0000-4000-8000-000000000075');
+        $failed = $this->preview('Documento sin analizar', 'https://example.test/documento-sin-analizar');
+        $failed->update([
+            'status' => 'error',
+            'raw_data' => [
+                'ai_success' => false,
+                'anthropic_success' => false,
+                'ai_error_type' => 'http_error',
+                'ai_error' => 'Error de conexión.',
+                'manual_review_reasons' => ['Error de conexión.'],
+            ],
+        ]);
+        $this->batchItem($batch, $failed, 'technical-ai-error');
+
+        $this->livewirePreview($batch->id)
+            ->assertDontSee('Publicar de todas formas')
+            ->call('publishAnyway', $failed->id)
+            ->assertSet(
+                'errorMessage',
+                'Esta previsualización no puede publicarse de todas formas: corrige primero los datos indispensables o el error técnico.',
+            );
+
+        $this->assertSame('error', $failed->fresh()->status);
+        $this->assertSame(0, Announcement::query()->count());
     }
 
     public function test_visible_batch_query_excludes_previews_from_other_batches(): void
@@ -1041,8 +1287,28 @@ class SicoesBatchIsolationTest extends TestCase
         });
         Schema::create('announcements', function (Blueprint $table): void {
             $table->id();
+            $table->text('announce_title')->nullable();
+            $table->longText('description')->nullable();
+            $table->dateTime('expiration_time')->nullable();
+            $table->unsignedBigInteger('salary')->default(0);
+            $table->boolean('pro')->default(false);
+            $table->dateTime('scheduled_at')->nullable();
+            $table->unsignedBigInteger('company_id')->nullable();
+            $table->string('user_id')->nullable();
             $table->text('source_url')->nullable();
             $table->string('source_hash', 64)->nullable();
+            $table->timestamps();
+        });
+        Schema::create('announcement_profesion', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('announcement_id');
+            $table->unsignedBigInteger('profesion_id');
+            $table->timestamps();
+        });
+        Schema::create('announcement_location', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('announcement_id');
+            $table->unsignedBigInteger('location_id');
             $table->timestamps();
         });
         Schema::create('bot_vacancy_previews', function (Blueprint $table): void {
