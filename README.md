@@ -1,6 +1,6 @@
 # Trabajonautas Automatización Web
 
-Aplicación local en Laravel para recopilar y revisar convocatorias. El scraping y las previsualizaciones se guardan en la base de datos local de cada PC. Al publicar, la aplicación se conecta a la base de datos del sitio y, cuando hay adjuntos, los transfiere por FTPS explícito.
+Aplicación local en Laravel para recopilar y revisar convocatorias. El scraping y las previsualizaciones se guardan en la base de datos local de cada PC. Al publicar, la aplicación se conecta a la base de datos del sitio y, cuando hay adjuntos, los transfiere por SFTP sobre SSH.
 
 ## Requisitos para Windows
 
@@ -77,7 +77,7 @@ No copies el `.env` de otra computadora ni lo subas al repositorio. Cada PC debe
 | `ANTHROPIC_API_KEY` y `ANTHROPIC_MODEL` | Análisis de convocatorias con Claude | Si se utilizarán las funciones de análisis con IA. La clave consume la cuenta/cupo al que pertenece. |
 | `SICOES_NODE_PATH`, `SICOES_BROWSER_PATH`, `SICOES_PDFTOTEXT_PATH` | Rutas locales de Node, Chrome/Edge y `pdftotext` | Solo si no se detectan automáticamente o el scraper lo requiere. Déjalas vacías si se encuentran por `PATH` o en las rutas conocidas. |
 | `SITE_DB_HOST`, `SITE_DB_PORT`, `SITE_DB_DATABASE`, `SITE_DB_USERNAME`, `SITE_DB_PASSWORD` | Conexión remota a la base existente del sitio | Solo para sincronizar empresas y publicar. El host debe ser la IP pública del VPS, no `127.0.0.1`. El administrador debe autorizar la IP pública de la oficina. |
-| `SITE_FILES_HOST`, `SITE_FILES_PORT`, `SITE_FILES_USERNAME`, `SITE_FILES_PASSWORD`, `SITE_FILES_ROOT` | Transferencia de archivos por FTPS explícito | Necesarias si se publicarán convocatorias con PDF o imágenes. `SITE_FILES_ROOT` debe ser la ruta FTP absoluta que corresponde a `storage/app/public` en el servidor. |
+| `SITE_FILES_PROTOCOL`, `SITE_FILES_HOST`, `SITE_FILES_PORT`, `SITE_FILES_USERNAME`, `SITE_FILES_PASSWORD`, `SITE_FILES_ROOT`, `SITE_FILES_HOSTKEY_SHA256` | Transferencia de archivos por SFTP autenticado con huella SHA-256 | Necesarias si se publicarán convocatorias con PDF o imágenes. La ruta debe ser absoluta y corresponder al almacenamiento que sirve `public/storage`. La huella debe confirmarse con el administrador. |
 
 Las demás opciones están documentadas como nombres y valores predeterminados en `.env.example`. No agregues contraseñas, claves API, tokens ni datos de producción a ese archivo de ejemplo.
 
@@ -124,9 +124,9 @@ php artisan config:clear
 - `SITE_DB_*` permite leer el catálogo remoto y escribir anuncios en las tablas existentes del sitio cuando se pulsa publicar.
 - La acción **Publicar todas** procesa las previsualizaciones revisadas/editadas del lote actual; revisa el lote antes de confirmar.
 - La misma URL de origen se reconoce para evitar crear otra fila para esa misma fuente.
-- Si una convocatoria incluye archivos, deben subirse al servidor antes de que se considere publicada correctamente. La PC debe tener FTPS explícito con TLS habilitado y la ruta correcta en `SITE_FILES_ROOT`.
+- Si una convocatoria incluye archivos, deben subirse al servidor antes de que se considere publicada correctamente. La PC debe tener SFTP en el puerto 22, la huella SSH verificada y la ruta correcta en `SITE_FILES_ROOT`.
 
-Si FTPS responde `500` al comando `AUTH TLS`, el servidor aún no está aceptando FTPS explícito para esa cuenta. El administrador del VPS debe habilitarlo, configurar sus puertos pasivos y proporcionar la ruta FTP correspondiente a `storage/app/public`. No se debe publicar una convocatoria con adjuntos hasta que la transferencia esté funcionando.
+El usuario SFTP puede tener acceso a una carpeta distinta del directorio que la web publica como `storage`. El administrador debe confirmar qué ruta remota corresponde a `public/storage` y que los archivos guardados allí se sirvan mediante `https://trabajonautas.com/storage/...`. No se debe publicar una convocatoria con adjuntos hasta confirmar esa correspondencia y verificar una transferencia.
 
 ## Solución de problemas
 
@@ -135,7 +135,7 @@ Si FTPS responde `500` al comando `AUTH TLS`, el servidor aún no está aceptand
 - No aparecen empresas web: revisa `SITE_DB_*`, la conectividad desde la oficina y que la IP pública esté permitida por el VPS.
 - Claude no está disponible: revisa que `ANTHROPIC_API_KEY` esté configurada en `.env` y limpia la caché de configuración.
 - SICOES no inicia: confirma Node.js 18+, un navegador Chrome/Edge instalado y que `pdftotext` esté disponible si se requiere extraer PDFs.
-- Los archivos no se publican: verifica FTPS explícito sobre TLS, los puertos pasivos y `SITE_FILES_ROOT` con el administrador del VPS.
+- Los archivos no se publican: verifica que el servidor permita SFTP por el puerto 22, que `SITE_FILES_HOSTKEY_SHA256` coincida con la huella confirmada por el administrador y que `SITE_FILES_ROOT` apunte al almacenamiento público de la web.
 
 ## Seguridad
 

@@ -60,13 +60,13 @@
                     </div>
                     <div>
                         <div class="flex flex-wrap items-center gap-2">
-                            <p class="text-lg font-black text-slate-950 dark:text-white">Automática</p>
+                            <p class="text-lg font-black text-slate-950 dark:text-white">Modo de ejecución</p>
                             <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold uppercase text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
                                 <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-                                Activa
+                                Manual
                             </span>
                         </div>
-                        <p class="text-sm font-semibold text-slate-500 dark:text-neutral-300">Última ejecución: hoy, 09:41</p>
+                        <p class="text-sm font-semibold text-slate-500 dark:text-neutral-300">Inicia el scraper desde una fuente para crear un lote.</p>
                     </div>
                 </div>
             </div>
@@ -81,7 +81,7 @@
                             {{ $source->icon ?: 'BOT' }}
                         </div>
 
-                        @if (in_array($source->scraper_type, ['evaluar', 'sicoes'], true))
+                        @if (in_array($source->scraper_type, ['evaluar', 'etalent', 'sicoes'], true))
                             <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-500/30">
                                 <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
                                 Activa
@@ -102,7 +102,7 @@
 
                     <div class="my-6 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent dark:via-white/10"></div>
 
-                    @if (in_array($source->scraper_type, ['evaluar', 'sicoes'], true))
+                    @if (in_array($source->scraper_type, ['evaluar', 'etalent', 'sicoes'], true))
                         <div class="grid gap-3">
                             <div class="rounded-2xl bg-slate-50 p-4 dark:bg-neutral-800/80">
                                 <p class="text-xs font-bold uppercase tracking-wide text-slate-400 dark:text-neutral-400">
@@ -114,11 +114,11 @@
                             <div class="grid grid-cols-2 gap-3">
                                 <div class="rounded-2xl bg-orange-50 p-4 dark:bg-orange-500/10">
                                     <p class="text-xs font-bold uppercase tracking-wide text-orange-500 dark:text-orange-200">Estado</p>
-                                    <p class="mt-1 text-sm font-black text-orange-700 dark:text-orange-100">100% operativa</p>
+                                    <p class="mt-1 text-sm font-black text-orange-700 dark:text-orange-100">{{ $source->scraper_type === 'etalent' ? 'Scraper implementado' : '100% operativa' }}</p>
                                 </div>
                                 <div class="rounded-2xl bg-emerald-50 p-4 dark:bg-emerald-500/10">
                                     <p class="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-200">Fuente</p>
-                                    <p class="mt-1 text-sm font-black text-emerald-700 dark:text-emerald-100">Lista</p>
+                                    <p class="mt-1 text-sm font-black text-emerald-700 dark:text-emerald-100">{{ $source->scraper_type === 'etalent' ? 'Portal E-Talent' : 'Lista' }}</p>
                                 </div>
                             </div>
                         </div>

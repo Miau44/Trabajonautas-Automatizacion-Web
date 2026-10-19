@@ -22,6 +22,8 @@ class DatabaseSeeder extends Seeder
             AccountTypeSeeder::class,
             ClientSeeder::class,
             NoticeSeeder::class,
+            BotSourceSeeder::class,
+            BotCompanySeeder::class,
             //TbnSettingSeeder::class
         ]);
     }

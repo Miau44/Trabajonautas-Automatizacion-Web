@@ -53,7 +53,7 @@ class SiteAnnouncementPublisherTest extends TestCase
             );
             $this->fail('Expected local-only attachments to stop publication.');
         } catch (RuntimeException $exception) {
-            $this->assertStringContainsString('acceso FTPS explícito', $exception->getMessage());
+            $this->assertStringContainsString('acceso de archivos del sitio', $exception->getMessage());
         }
     }
 

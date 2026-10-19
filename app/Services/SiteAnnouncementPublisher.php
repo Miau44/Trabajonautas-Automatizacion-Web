@@ -324,15 +324,26 @@ class SiteAnnouncementPublisher
         $settings = (array) config('site_publishing.files', []);
         foreach (['host', 'username', 'password', 'root'] as $key) {
             if (trim((string) ($settings[$key] ?? '')) === '') {
-                throw new RuntimeException('Publicación cancelada: falta configurar el acceso FTPS explícito para los archivos del sitio (SITE_FILES_*).');
+                throw new RuntimeException('Publicacion cancelada: falta configurar el acceso de archivos del sitio (SITE_FILES_*).');
             }
         }
+
+        $protocol = strtolower(trim((string) ($settings['protocol'] ?? 'sftp')));
+        if (! in_array($protocol, ['sftp', 'ftps'], true)) {
+            throw new RuntimeException('SITE_FILES_PROTOCOL debe ser sftp o ftps.');
+        }
+        if ($protocol === 'sftp' && trim((string) ($settings['hostkey_sha256'] ?? '')) === '') {
+            throw new RuntimeException('Publicacion cancelada: falta la huella SHA-256 verificada del servidor SFTP (SITE_FILES_HOSTKEY_SHA256).');
+        }
+
         $root = rtrim(str_replace('\\', '/', trim((string) $settings['root'])), '/');
         if ($root === '' || preg_match('#(^|/)\.\.?(/|$)#', $root)) {
-            throw new RuntimeException('SITE_FILES_ROOT debe ser la ruta FTP segura que corresponde a storage/app/public.');
+            throw new RuntimeException('SITE_FILES_ROOT debe ser la ruta remota segura que la web sirve como almacenamiento publico.');
+        }
+        if ($protocol === 'sftp' && ! str_starts_with($root, '/')) {
+            throw new RuntimeException('SITE_FILES_ROOT debe ser una ruta SFTP absoluta.');
         }
     }
-
     private function transferAttachments(array $settings, string $root, array $attachments, string $sourceUrl): array
     {
         $sourceHash = hash('sha256', $sourceUrl);
@@ -357,7 +368,7 @@ class SiteAnnouncementPublisher
             $contentHash = hash_file('sha256', $localPath);
             $relativePath = 'convocatorias/bot/'.$sourceHash.'/'.($index + 1).'-'.substr($contentHash, 0, 16).'-'.$stem
                 .($extension !== '' ? '.'.strtolower($extension) : '');
-            $this->uploadWithExplicitFtps($settings, $root.'/'.$relativePath, $localPath);
+            $this->uploadFile($settings, $root.'/'.$relativePath, $localPath);
 
             $uploaded[] = [
                 'url' => $relativePath,
@@ -368,17 +379,18 @@ class SiteAnnouncementPublisher
         return $uploaded;
     }
 
-    private function uploadWithExplicitFtps(array $settings, string $remotePath, string $localPath): void
+    private function uploadFile(array $settings, string $remotePath, string $localPath): void
     {
-        if (! extension_loaded('curl') || ! defined('CURLUSESSL_ALL')) {
-            throw new RuntimeException('No está disponible cURL con soporte FTPS explícito para transferir archivos.');
+        $protocol = strtolower(trim((string) ($settings['protocol'] ?? 'sftp')));
+        if (! extension_loaded('curl')) {
+            throw new RuntimeException('No esta disponible cURL para transferir archivos al sitio.');
         }
 
         $host = trim((string) $settings['host']);
-        $port = (int) ($settings['port'] ?? 21);
+        $port = (int) ($settings['port'] ?? ($protocol === 'sftp' ? 22 : 21));
         $timeout = max(1, (int) ($settings['timeout'] ?? 20));
         $segments = array_map('rawurlencode', explode('/', ltrim($remotePath, '/')));
-        $url = 'ftp://'.$host.':'.$port.'/'.implode('/', $segments);
+        $url = ($protocol === 'sftp' ? 'sftp://' : 'ftp://').$host.':'.$port.'/'.implode('/', $segments);
         $input = fopen($localPath, 'rb');
         if ($input === false) {
             throw new RuntimeException('No se pudo abrir localmente un archivo adjunto para transferir.');
@@ -387,41 +399,71 @@ class SiteAnnouncementPublisher
         $curl = curl_init($url);
         if ($curl === false) {
             fclose($input);
-            throw new RuntimeException('No se pudo iniciar el cliente FTPS.');
+            throw new RuntimeException('No se pudo iniciar el cliente de transferencia segura.');
         }
 
-        curl_setopt_array($curl, [
+        $options = [
             CURLOPT_UPLOAD => true,
             CURLOPT_INFILE => $input,
             CURLOPT_INFILESIZE => (int) filesize($localPath),
             CURLOPT_USERPWD => (string) $settings['username'].':'.(string) $settings['password'],
-            CURLOPT_USE_SSL => CURLUSESSL_ALL,
-            CURLOPT_FTPSSLAUTH => CURLFTPAUTH_TLS,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_FTP_CREATE_MISSING_DIRS => CURLFTP_CREATE_DIR_RETRY,
             CURLOPT_CONNECTTIMEOUT => $timeout,
             CURLOPT_TIMEOUT => max($timeout, 300),
             CURLOPT_FAILONERROR => true,
             CURLOPT_RETURNTRANSFER => true,
-        ]);
+        ];
+
+        if ($protocol === 'sftp') {
+            if (! defined('CURLOPT_SSH_HOST_PUBLIC_KEY_SHA256') || ! defined('CURLSSH_AUTH_PASSWORD')) {
+                fclose($input);
+                curl_close($curl);
+                throw new RuntimeException('cURL no cuenta con soporte para autenticar SFTP con huella SHA-256.');
+            }
+
+            $fingerprint = preg_replace('/^SHA256:/', '', trim((string) ($settings['hostkey_sha256'] ?? '')));
+            if (! is_string($fingerprint) || ! preg_match('/^[A-Za-z0-9+\\/]{43}=?$/', $fingerprint)) {
+                fclose($input);
+                curl_close($curl);
+                throw new RuntimeException('SITE_FILES_HOSTKEY_SHA256 no tiene un formato SHA-256 OpenSSH valido.');
+            }
+
+            $options[CURLOPT_SSH_AUTH_TYPES] = CURLSSH_AUTH_PASSWORD;
+            $options[CURLOPT_SSH_HOST_PUBLIC_KEY_SHA256] = $fingerprint;
+            $options[CURLOPT_FTP_CREATE_MISSING_DIRS] = CURLFTP_CREATE_DIR_RETRY;
+        } elseif ($protocol === 'ftps') {
+            if (! defined('CURLUSESSL_ALL')) {
+                fclose($input);
+                curl_close($curl);
+                throw new RuntimeException('cURL no cuenta con soporte para FTPS explicito.');
+            }
+            $options[CURLOPT_USE_SSL] = CURLUSESSL_ALL;
+            $options[CURLOPT_FTPSSLAUTH] = CURLFTPAUTH_TLS;
+            $options[CURLOPT_SSL_VERIFYPEER] = true;
+            $options[CURLOPT_SSL_VERIFYHOST] = 2;
+            $options[CURLOPT_FTP_CREATE_MISSING_DIRS] = CURLFTP_CREATE_DIR_RETRY;
+        } else {
+            fclose($input);
+            curl_close($curl);
+            throw new RuntimeException('SITE_FILES_PROTOCOL debe ser sftp o ftps.');
+        }
+
+        curl_setopt_array($curl, $options);
 
         try {
             $result = curl_exec($curl);
             if ($result === false) {
                 // Deliberately omit cURL's raw error text: some transports include endpoint details.
-                throw new RuntimeException('Falló la transferencia FTPS explícita o la verificación TLS del servidor.');
+                throw new RuntimeException('Fallo la transferencia segura de archivos o la verificacion del servidor remoto.');
             }
             $responseCode = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-            if ($responseCode < 200 || $responseCode >= 400) {
-                throw new RuntimeException('El servidor FTPS no confirmó la transferencia del archivo.');
+            if ($protocol === 'ftps' && ($responseCode < 200 || $responseCode >= 400)) {
+                throw new RuntimeException('El servidor FTPS no confirmo la transferencia del archivo.');
             }
         } finally {
             curl_close($curl);
             fclose($input);
         }
     }
-
     private function syncAttachments(Connection $db, int $announcementId, array $attachments): void
     {
         foreach ($attachments as $attachment) {

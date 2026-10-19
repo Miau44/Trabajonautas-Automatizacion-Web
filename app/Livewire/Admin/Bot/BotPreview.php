@@ -1520,7 +1520,7 @@ class BotPreview extends Component
     #[Computed]
     public function companies()
     {
-        $connection = config('database.connections.site');
+        $connection = config('database.connections.site', []);
         $cacheKey = 'site_company_catalog_synced:'.hash(
             'sha256',
             implode('|', [
@@ -1528,12 +1528,19 @@ class BotPreview extends Component
                 (string) ($connection['database'] ?? ''),
             ]),
         );
+        $hasUrl = trim((string) ($connection['url'] ?? '')) !== '';
+        $hasConnectionDetails = collect(['host', 'database', 'username', 'password'])
+            ->every(fn (string $key): bool => trim((string) ($connection[$key] ?? '')) !== '');
 
-        try {
-            Cache::remember($cacheKey, now()->addMinutes(15), fn () => app(\App\Services\SiteCompanyCatalogSynchronizer::class)
-                ->sync((string) auth()->id()));
-        } catch (\Throwable) {
-            $this->errorMessage = 'No se pudo actualizar el catálogo desde la web; se muestran las últimas empresas sincronizadas que hay en esta PC. Revisa SITE_DB_* para mantenerlo al día.';
+        if (! $hasUrl && ! $hasConnectionDetails) {
+            $this->errorMessage = 'Falta configurar la conexión remota del sitio en el .env de esta PC: SITE_DB_HOST, SITE_DB_DATABASE, SITE_DB_USERNAME y SITE_DB_PASSWORD. No uses aquí DB_*, porque esos datos son para la base local. Luego ejecuta php artisan config:clear y recarga la página.';
+        } else {
+            try {
+                Cache::remember($cacheKey, now()->addMinutes(15), fn () => app(\App\Services\SiteCompanyCatalogSynchronizer::class)
+                    ->sync((string) auth()->id()));
+            } catch (\Throwable) {
+                $this->errorMessage = 'No se pudo conectar al catálogo web. Revisa SITE_DB_* en el .env de esta PC, la conexión a internet y que la IP pública de la oficina esté permitida por el firewall del VPS.';
+            }
         }
 
         return Company::query()
@@ -1541,7 +1548,6 @@ class BotPreview extends Component
             ->orderBy('company_name')
             ->get(['id', 'company_name']);
     }
-
     private function isGeminiJobBoardSource(): bool
     {
         return in_array($this->source->scraper_type, ['evaluar', 'etalent'], true);
