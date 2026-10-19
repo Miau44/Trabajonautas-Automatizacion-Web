@@ -2,8 +2,6 @@
 
 namespace App\Livewire\Admin\Bot;
 
-use App\Models\Announcement;
-use App\Models\AnnouncementFile;
 use App\Models\Area;
 use App\Models\BotCompany;
 use App\Models\BotSource;
@@ -18,6 +16,7 @@ use App\Services\Bot\BotVacancyNormalizer;
 use App\Services\Bot\ETalentScraperService;
 use App\Services\Bot\EvaluarScraperService;
 use App\Services\ProfessionAssignmentService;
+use App\Services\SiteAnnouncementPublisher;
 use App\Support\BotUiLabels;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -221,7 +220,7 @@ class BotPreview extends Component
             'description' => $preview->description ?? '',
             'source_url' => $preview->source_url,
             'selected_company_id' => $company?->id,
-            'selected_area_id' => $preview->selected_area_id,
+            'selected_area_id' => $this->selectedAreaIdForEditing($preview),
             'selected_profession_ids' => $professionIds,
             'selected_location_ids' => collect($preview->selected_location_ids ?: $this->resolveLocations($preview))
                 ->map(fn ($id) => (int) $id)
@@ -249,6 +248,7 @@ class BotPreview extends Component
             data_get($preview->raw_data, 'ai_analysis.area_principal_catalogo'),
             (float) data_get($preview->raw_data, 'ai_analysis.confianza_area_principal', 0),
             data_get($preview->raw_data, 'ai_analysis.evidencia_area_principal'),
+            aiProviderLabel: 'Claude',
         );
         $result = $this->professionAssignments()->applyDetectedResolutionToPreview($preview, $assignment, [
             'source' => 'bot_preview_recalculate',
@@ -281,6 +281,12 @@ class BotPreview extends Component
 
     public function saveEdit(): void
     {
+        $preview = $this->batchPreviewsQuery()->findOrFail($this->editingId);
+
+        if ($this->source->scraper_type === 'sicoes' && empty($this->form['selected_area_id'])) {
+            $this->form['selected_area_id'] = $this->selectedAreaIdForEditing($preview);
+        }
+
         $this->validate([
             'form.title' => 'required|min:5|max:255',
             'form.area' => 'nullable|max:255',
@@ -301,7 +307,6 @@ class BotPreview extends Component
         ]);
         $this->validateSelectedProfessionsBelongToArea();
 
-        $preview = $this->batchPreviewsQuery()->findOrFail($this->editingId);
         $normalizedFields = $this->normalizedFormFields($preview);
         $locationSelection = $this->locationSelectionData($this->form['selected_location_ids']);
         $selectedLocationIds = $locationSelection['ids'];
@@ -373,11 +378,19 @@ class BotPreview extends Component
         foreach ($previews as $preview) {
             try {
                 DB::transaction(function () use ($preview, &$published) {
-                    $announcement = $this->publishPreview($preview);
+                    $publication = $this->publishPreview($preview);
 
                     $preview->update([
                         'status' => 'published',
-                        'convocatoria_id' => $announcement->id,
+                        'convocatoria_id' => null,
+                        'raw_data' => array_merge($preview->raw_data ?? [], [
+                            'remote_publication' => [
+                                'announcement_id' => $publication['id'],
+                                'created' => $publication['created'],
+                                'attachment_count' => $publication['attachment_count'],
+                                'published_at' => now()->toIso8601String(),
+                            ],
+                        ]),
                     ]);
 
                     $this->currentBatchItemForPreview($preview->id)?->update(['status' => 'published']);
@@ -399,6 +412,43 @@ class BotPreview extends Component
 
         if ($failed > 0) {
             $this->errorMessage = "{$failed} convocatoria(s) no se pudieron publicar y quedaron marcadas como error.";
+        }
+
+        $this->resetPage('previewsPage');
+    }
+
+    public function publishAnyway(int $previewId): void
+    {
+        $this->reset(['message', 'errorMessage']);
+        $preview = $this->batchPreviewsQuery()->findOrFail($previewId);
+
+        try {
+            DB::transaction(function () use ($preview): void {
+                $this->assertCanPublishAnyway($preview);
+                $publication = $this->publishPreview($preview, allowClassificationOverride: true);
+
+                $preview->refresh();
+                $preview->update([
+                    'status' => 'published',
+                    'convocatoria_id' => null,
+                    'raw_data' => array_merge($preview->raw_data ?? [], [
+                        'remote_publication' => [
+                            'announcement_id' => $publication['id'],
+                            'created' => $publication['created'],
+                            'attachment_count' => $publication['attachment_count'],
+                            'published_at' => now()->toIso8601String(),
+                        ],
+                        'published_anyway' => true,
+                        'published_anyway_at' => now()->toIso8601String(),
+                        'published_anyway_by' => auth()->id(),
+                    ]),
+                ]);
+                $this->currentBatchItemForPreview($preview->id)?->update(['status' => 'published']);
+            });
+
+            $this->message = 'La convocatoria se publicó conservando todas sus profesiones explícitas.';
+        } catch (\Throwable $exception) {
+            $this->errorMessage = $exception->getMessage();
         }
 
         $this->resetPage('previewsPage');
@@ -454,8 +504,8 @@ class BotPreview extends Component
             return;
         }
 
-        if (! config('services.gemini.key')) {
-            $this->errorMessage = 'Gemini esta desactivado porque falta GEMINI_API_KEY.';
+        if (! config('services.anthropic.api_key')) {
+            $this->errorMessage = 'Claude esta desactivado porque falta ANTHROPIC_API_KEY.';
 
             return;
         }
@@ -477,7 +527,7 @@ class BotPreview extends Component
 
         $this->message = "Reanálisis terminado. Procesadas: {$retried}. Sin revisión pendiente: {$recovered}.";
         if ($failed > 0) {
-            $this->errorMessage = "Gemini no pudo completar {$failed} análisis. Los detalles sanitizados quedaron en cada previsualización.";
+            $this->errorMessage = "Claude no pudo completar {$failed} análisis. Los detalles sanitizados quedaron en cada previsualización.";
         }
     }
 
@@ -496,8 +546,8 @@ class BotPreview extends Component
             return;
         }
 
-        if (! config('services.gemini.key')) {
-            $this->errorMessage = 'Gemini esta desactivado porque falta GEMINI_API_KEY.';
+        if (! config('services.anthropic.api_key')) {
+            $this->errorMessage = 'Claude esta desactivado porque falta ANTHROPIC_API_KEY.';
 
             return;
         }
@@ -529,6 +579,12 @@ class BotPreview extends Component
                 ->whereRaw('1 = 0')
                 ->paginate(12, ['*'], 'previewsPage');
 
+        $forcePublishablePreviewIds = $previews->getCollection()
+            ->filter(fn (BotVacancyPreview $preview): bool => $this->canPublishAnyway($preview))
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+
         return view('livewire.admin.bot.bot-preview', [
             'previews' => $previews,
             'currentSicoesBatch' => $this->currentSicoesBatch(),
@@ -543,10 +599,14 @@ class BotPreview extends Component
             'publishablePreviewCount' => $this->currentBatchId
                 ? $this->batchPreviewsQuery()->whereIn('status', ['preview', 'edited'])->count()
                 : 0,
+            'forcePublishablePreviewIds' => $forcePublishablePreviewIds,
         ]);
     }
 
-    private function publishPreview(BotVacancyPreview $preview): Announcement
+    private function publishPreview(
+        BotVacancyPreview $preview,
+        bool $allowClassificationOverride = false,
+    ): array
     {
         $company = $preview->selected_company_id
             ? Company::find($preview->selected_company_id)
@@ -556,13 +616,13 @@ class BotPreview extends Component
         if ($professionIds === []) {
             throw new \RuntimeException('La previsualización no tiene profesiones explícitas validadas.');
         }
-        $this->assertPreviewProfessionAreaIntegrity($preview, $professionIds);
+        if (! $allowClassificationOverride) {
+            $this->assertPreviewProfessionAreaIntegrity($preview, $professionIds);
+        }
 
         $normalizedFields = $this->normalizedPreviewFields($preview);
         $locationIds = $preview->selected_location_ids ?: $this->locationIdsForPublication($preview, $normalizedFields);
         $locationIds = $this->locationSelectionData($locationIds)['ids'];
-        $sourceHash = hash('sha256', $preview->source_url);
-
         $preview->update([
             'department' => $normalizedFields['department'],
             'location' => $normalizedFields['location'],
@@ -580,18 +640,6 @@ class BotPreview extends Component
             ]),
         ]);
 
-        $legacySourceHash = (string) data_get($preview->raw_data, 'legacy_source_hash');
-        $usesSicoesDocumentIdentity = $this->source->scraper_type === 'sicoes'
-            && (string) data_get($preview->raw_data, 'document_id') !== '';
-        $announcement = Announcement::query()
-            ->where('source_hash', $sourceHash)
-            ->orWhere('source_url', $preview->source_url)
-            ->when(
-                $legacySourceHash !== '' && ! $usesSicoesDocumentIdentity,
-                fn ($query) => $query->orWhere('source_hash', $legacySourceHash),
-            )
-            ->first();
-
         $data = [
             'announce_title' => $preview->title,
             'description' => $this->descriptionForAnnouncement($preview->description),
@@ -602,30 +650,30 @@ class BotPreview extends Component
             'salary' => $this->salaryForAnnouncement($normalizedFields['salary']),
             'pro' => (bool) $preview->is_pro,
             'scheduled_at' => null,
-            'company_id' => $company->id,
-            'user_id' => auth()->id(),
-            'source_url' => $preview->source_url,
-            'source_hash' => $sourceHash,
         ];
 
-        if ($announcement) {
-            $announcement->update($data);
-        } else {
-            $announcement = Announcement::create($data);
-        }
+        $professionNames = Profesion::query()->whereIn('id', $professionIds)->pluck('profesion_name')->all();
+        $locationNames = Location::query()->whereIn('id', $locationIds)->pluck('location_name')->all();
 
-        $announcement->profesions()->sync($professionIds);
-        $announcement->locations()->sync($locationIds);
-        $this->syncPreviewAttachments($announcement, $preview);
-
-        return $announcement;
+        return app(SiteAnnouncementPublisher::class)->publish(
+            preview: $preview,
+            company: $company,
+            professionNames: $professionNames,
+            locationNames: $locationNames,
+            announcement: $data,
+        );
     }
 
     private function resolveCompany(): Company
     {
+        $company = $this->company->realCompany();
+        if ($company) {
+            return $company;
+        }
+
         $normalizedName = $this->normalize($this->company->name);
 
-        $company = Company::withTrashed()->get()->first(function (Company $company) use ($normalizedName) {
+        $company = Company::withTrashed()->whereNull('site_company_id')->get()->first(function (Company $company) use ($normalizedName) {
             $current = $this->normalize($company->company_name);
 
             return $current === $normalizedName
@@ -721,6 +769,45 @@ class BotPreview extends Component
         }
     }
 
+    private function selectedAreaIdForEditing(BotVacancyPreview $preview): ?int
+    {
+        $rawData = $preview->raw_data ?? [];
+        $resolvedAreaIds = collect(data_get($rawData, 'profession_resolution.area_ids', []))
+            ->map(fn ($id): int => (int) $id)
+            ->filter()
+            ->unique()
+            ->values();
+        $storedCandidates = collect([
+            $preview->selected_area_id,
+            data_get($rawData, 'profession_resolution.selected_area_id'),
+            data_get($rawData, 'profession_resolution.area_dominante.area_id'),
+            data_get($rawData, 'profession_resolution.area_principal_ia.area_id'),
+        ])->map(fn ($id): int => (int) $id)->filter();
+
+        foreach ($storedCandidates as $areaId) {
+            if (Area::query()->whereKey($areaId)->exists()) {
+                return $areaId;
+            }
+        }
+
+        $aiAreaName = trim((string) data_get($rawData, 'ai_analysis.area_principal_catalogo'));
+        if ($aiAreaName !== '') {
+            $aiArea = Area::query()->get(['id', 'area_name'])->first(
+                fn (Area $area): bool => $this->normalize($area->area_name) === $this->normalize($aiAreaName),
+            );
+
+            if ($aiArea && ($resolvedAreaIds->isEmpty() || $resolvedAreaIds->contains((int) $aiArea->id))) {
+                return (int) $aiArea->id;
+            }
+        }
+
+        $fallbackAreaId = $resolvedAreaIds->first(
+            fn (int $areaId): bool => Area::query()->whereKey($areaId)->exists(),
+        );
+
+        return $fallbackAreaId ? (int) $fallbackAreaId : null;
+    }
+
     private function assertPreviewProfessionAreaIntegrity(
         BotVacancyPreview $preview,
         array $professionIds,
@@ -759,7 +846,10 @@ class BotPreview extends Component
         int $areaId,
     ): bool {
         $resolution = data_get($preview->raw_data, 'profession_resolution', []);
-        $aiAreaId = (int) data_get($resolution, 'area_principal_ia.area_id', 0);
+        $resolvedAreaIds = collect(data_get($resolution, 'area_ids', []))
+            ->map(fn ($id): int => (int) $id)
+            ->filter()
+            ->unique();
         $resolvedIds = collect(data_get($resolution, 'profession_ids', []))
             ->map(fn ($id): int => (int) $id)
             ->filter()
@@ -768,12 +858,93 @@ class BotPreview extends Component
             ->map(fn ($id): int => (int) $id)
             ->filter()
             ->unique();
+        $blockingReasons = collect(data_get($resolution, 'motivos_revision', []))
+            ->reject(fn (mixed $reason): bool => $this->isAreaClassificationWarning((string) $reason));
 
-        return $aiAreaId > 0
-            && $aiAreaId === $areaId
-            && ! (bool) data_get($resolution, 'requiere_revision', true)
+        return $areaId > 0
+            && $resolvedAreaIds->contains($areaId)
+            && $blockingReasons->isEmpty()
+            && (array) data_get($resolution, 'profesiones_no_identificadas', []) === []
+            && (array) data_get($resolution, 'profesiones_ambiguas', []) === []
             && $requestedIds->isNotEmpty()
             && $requestedIds->diff($resolvedIds)->isEmpty();
+    }
+
+    private function canPublishAnyway(BotVacancyPreview $preview): bool
+    {
+        if ($this->source->scraper_type !== 'sicoes' || $preview->status !== 'error') {
+            return false;
+        }
+
+        $rawData = $preview->raw_data ?? [];
+        $analysisSucceeded = data_get($rawData, 'anthropic_success') === true
+            || data_get($rawData, 'ai_success') === true;
+        $technicalError = collect([
+            data_get($rawData, 'document_error_type'),
+            data_get($rawData, 'document_error'),
+            data_get($rawData, 'ai_error_type'),
+            data_get($rawData, 'ai_error'),
+            data_get($rawData, 'anthropic_error_type'),
+            data_get($rawData, 'anthropic_error'),
+        ])->contains(fn (mixed $value): bool => $value !== null && $value !== '' && $value !== false);
+        $reasons = collect([
+            ...((array) data_get($rawData, 'manual_review_reasons', [])),
+            ...((array) data_get($rawData, 'profession_resolution.motivos_revision', [])),
+        ])->filter(fn (mixed $reason): bool => trim((string) $reason) !== '')->unique();
+        $professionIds = collect($preview->selected_profession_ids ?: [])
+            ->map(fn ($id): int => (int) $id)
+            ->filter()
+            ->unique();
+        $locationIds = collect($preview->selected_location_ids ?: [])
+            ->map(fn ($id): int => (int) $id)
+            ->filter()
+            ->unique();
+
+        if (
+            ! $analysisSucceeded
+            || $technicalError
+            || $reasons->isEmpty()
+            || $reasons->contains(fn (mixed $reason): bool => ! $this->isAreaClassificationWarning((string) $reason))
+            || mb_strlen(trim((string) $preview->title)) < 5
+            || trim(strip_tags((string) $preview->description)) === ''
+            || ! $preview->selected_company_id
+            || ! Company::query()->whereKey($preview->selected_company_id)->exists()
+            || $professionIds->isEmpty()
+            || Profesion::query()->whereIn('id', $professionIds)->count() !== $professionIds->count()
+            || $locationIds->isEmpty()
+            || Location::query()->whereIn('id', $locationIds)->get()
+                ->reject(fn (Location $location): bool => $this->normalize($location->location_name) === 'no especificado')
+                ->isEmpty()
+        ) {
+            return false;
+        }
+
+        try {
+            $expiration = Carbon::parse((string) $preview->expiration_date);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $expiration->year > 2000 && ! $expiration->isPast();
+    }
+
+    private function assertCanPublishAnyway(BotVacancyPreview $preview): void
+    {
+        if (! $this->canPublishAnyway($preview)) {
+            throw new \RuntimeException(
+                'Esta previsualización no puede publicarse de todas formas: corrige primero los datos indispensables o el error técnico.',
+            );
+        }
+    }
+
+    private function isAreaClassificationWarning(string $reason): bool
+    {
+        $normalized = $this->normalize($reason);
+
+        return str_contains($normalized, 'area principal')
+            || str_contains($normalized, 'varias areas')
+            || str_contains($normalized, 'area dominante')
+            || str_contains($normalized, 'confianza del area');
     }
 
     private function resolveProfessions(BotVacancyPreview $preview, bool $force = false): array
@@ -1304,25 +1475,6 @@ class BotPreview extends Component
         return null;
     }
 
-    private function syncPreviewAttachments(Announcement $announcement, BotVacancyPreview $preview): void
-    {
-        foreach ($preview->attachments ?? [] as $attachment) {
-            if (empty($attachment['url'])) {
-                continue;
-            }
-
-            AnnouncementFile::firstOrCreate(
-                [
-                    'announcement_id' => $announcement->id,
-                    'url' => $attachment['url'],
-                ],
-                [
-                    'original_name' => $attachment['original_name'] ?? basename($attachment['url']),
-                ],
-            );
-        }
-    }
-
     #[Computed]
     public function profesions(): array
     {
@@ -1368,7 +1520,26 @@ class BotPreview extends Component
     #[Computed]
     public function companies()
     {
-        return Cache::remember('companies', 86400, fn () => Company::all(['id', 'company_name']));
+        $connection = config('database.connections.site');
+        $cacheKey = 'site_company_catalog_synced:'.hash(
+            'sha256',
+            implode('|', [
+                (string) ($connection['host'] ?? ''),
+                (string) ($connection['database'] ?? ''),
+            ]),
+        );
+
+        try {
+            Cache::remember($cacheKey, now()->addMinutes(15), fn () => app(\App\Services\SiteCompanyCatalogSynchronizer::class)
+                ->sync((string) auth()->id()));
+        } catch (\Throwable) {
+            $this->errorMessage = 'No se pudo actualizar el catálogo desde la web; se muestran las últimas empresas sincronizadas que hay en esta PC. Revisa SITE_DB_* para mantenerlo al día.';
+        }
+
+        return Company::query()
+            ->whereNotNull('site_company_id')
+            ->orderBy('company_name')
+            ->get(['id', 'company_name']);
     }
 
     private function isGeminiJobBoardSource(): bool

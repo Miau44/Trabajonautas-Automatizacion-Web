@@ -2,6 +2,19 @@
 
 return [
 
+    'site_publishing' => [
+        'user_id' => env('SITE_PUBLISH_USER_ID'),
+        'announcement_type_slug' => env('SITE_PUBLISH_ANNOUNCEMENT_TYPE_SLUG'),
+        'files' => [
+            'host' => env('SITE_FILES_HOST'),
+            'port' => (int) env('SITE_FILES_PORT', 21),
+            'username' => env('SITE_FILES_USERNAME'),
+            'password' => env('SITE_FILES_PASSWORD'),
+            'root' => env('SITE_FILES_ROOT'),
+            'timeout' => (int) env('SITE_FILES_TIMEOUT', 20),
+        ],
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services
@@ -54,24 +67,6 @@ return [
         ],
     ],
 
-    'gemini' => [
-        'key' => env('GEMINI_API_KEY'),
-        'model' => env('GEMINI_MODEL') ?: 'gemini-2.5-flash-lite',
-        'verify_ssl' => filter_var(
-            env('GEMINI_VERIFY_SSL', true),
-            FILTER_VALIDATE_BOOLEAN,
-        ),
-        'ca_bundle' => env('GEMINI_CA_BUNDLE') ?: null,
-        'timeout' => max(1, min(300, (int) env('GEMINI_TIMEOUT', 60))),
-        'connect_timeout' => max(1, min(60, (int) env('GEMINI_CONNECT_TIMEOUT', 10))),
-        'max_description_chars' => max(1000, (int) env('GEMINI_MAX_DESCRIPTION_CHARS', 6000)),
-        'max_output_tokens' => max(256, min(4096, (int) env('GEMINI_MAX_OUTPUT_TOKENS', 2048))),
-        'debug_ssl' => filter_var(
-            env('GEMINI_DEBUG_SSL', false),
-            FILTER_VALIDATE_BOOLEAN,
-        ),
-    ],
-
     'evaluar' => [
         'verify_ssl' => filter_var(
             env('EVALUAR_VERIFY_SSL', true),
@@ -113,6 +108,10 @@ return [
         'model' => env('ANTHROPIC_MODEL') ?: 'claude-haiku-4-5-20251001',
         'version' => env('ANTHROPIC_VERSION', '2023-06-01'),
         'max_tokens' => max(1, (int) env('ANTHROPIC_MAX_TOKENS', 4000)),
+        'timeout' => max(1, min(300, (int) env('ANTHROPIC_TIMEOUT', 60))),
+        'connect_timeout' => max(1, min(60, (int) env('ANTHROPIC_CONNECT_TIMEOUT', 10))),
+        'max_description_chars' => max(1000, (int) env('ANTHROPIC_MAX_DESCRIPTION_CHARS', 6000)),
+        'debug_ssl' => filter_var(env('ANTHROPIC_DEBUG_SSL', false), FILTER_VALIDATE_BOOLEAN),
         'verify_ssl' => filter_var(
             env('ANTHROPIC_VERIFY_SSL', true),
             FILTER_VALIDATE_BOOLEAN,

@@ -18,6 +18,10 @@ class Company extends Model
     // Permissions
     public $guarded = [];
 
+    protected $casts = [
+        'site_company_id' => 'integer',
+    ];
+
     public function getCompanyImageAttribute(?string $value): ?string
     {
         return StoragePath::normalizePublicPath($value);

@@ -204,8 +204,8 @@
                     } else {
                         $summaryMetrics = array_merge($summaryMetrics, [
                             'Pasantia/practica' => $lastScrapeSummary['skipped_internship'] ?? 0,
-                            'Gemini procesadas' => $lastScrapeSummary['gemini_processed'] ?? 0,
-                            'Gemini omitidas' => $lastScrapeSummary['gemini_skipped_existing_preview'] ?? 0,
+                            'Claude procesadas' => $lastScrapeSummary['gemini_processed'] ?? 0,
+                            'Claude omitidas' => $lastScrapeSummary['gemini_skipped_existing_preview'] ?? 0,
                             'Saltadas por rango' => $lastScrapeSummary['skipped_out_of_range'] ?? 0,
                         ]);
                     }
@@ -222,11 +222,11 @@
                         ]);
                     } else {
                         $summaryMetrics = array_merge($summaryMetrics, [
-                            'Gemini llamadas' => $lastScrapeSummary['gemini_calls'] ?? 0,
-                            'Tokens Gemini' => $lastScrapeSummary['gemini_total_tokens'] ?? 0,
+                            'Llamadas a Claude' => $lastScrapeSummary['gemini_calls'] ?? 0,
+                            'Tokens Claude' => $lastScrapeSummary['gemini_total_tokens'] ?? 0,
                             'Tokens entrada' => $lastScrapeSummary['gemini_prompt_tokens'] ?? 0,
                             'Tokens salida' => $lastScrapeSummary['gemini_candidates_tokens'] ?? 0,
-                            'Reintentos Gemini' => $lastScrapeSummary['gemini_retries'] ?? 0,
+                            'Reintentos Claude' => $lastScrapeSummary['gemini_retries'] ?? 0,
                             'Errores' => count($lastScrapeSummary['errors'] ?? []),
                             'Reactivadas' => $lastScrapeSummary['reactivated_deleted'] ?? 0,
                         ]);
@@ -242,7 +242,7 @@
                     @endforeach
                     <div class="rounded-2xl border border-purple-200 bg-purple-50 p-3 dark:border-purple-400/20 dark:bg-purple-400/10">
                         <p class="text-[11px] font-bold uppercase tracking-wide text-purple-700 dark:text-purple-200">
-                            {{ $source->scraper_type === 'sicoes' ? 'Claude' : 'Gemini' }}
+                            Claude
                         </p>
                         <p class="mt-1 text-sm font-black text-slate-950 dark:text-white">
                             @if ($source->scraper_type === 'sicoes')
@@ -252,12 +252,12 @@
                             @endif
                         </p>
                         <p class="text-[11px] text-purple-700/80 dark:text-purple-100/80">
-                            {{ $source->scraper_type === 'sicoes' ? ($lastScrapeSummary['ai_model'] ?? 'claude-haiku-4-5-20251001') : ($lastScrapeSummary['gemini_model'] ?? 'gemini-2.5-flash-lite') }}
+                            {{ $source->scraper_type === 'sicoes' ? ($lastScrapeSummary['ai_model'] ?? 'claude-haiku-4-5-20251001') : ($lastScrapeSummary['gemini_model'] ?? 'claude-haiku-4-5-20251001') }}
                         </p>
                     </div>
                     <div class="rounded-2xl border border-red-200 bg-red-50 p-3 dark:border-red-400/20 dark:bg-red-400/10">
                         <p class="text-[11px] font-bold uppercase tracking-wide text-red-700 dark:text-red-200">
-                            {{ $source->scraper_type === 'sicoes' ? 'Errores Claude' : 'Errores Gemini' }}
+                            Errores Claude
                         </p>
                         <p class="mt-1 text-xl font-black text-slate-950 dark:text-white">
                             {{ $source->scraper_type === 'sicoes' ? ($lastScrapeSummary['ai_errors'] ?? 0) : ($lastScrapeSummary['gemini_errors'] ?? 0) }}
@@ -280,7 +280,7 @@
 
                 @if ($source->scraper_type !== 'sicoes' && !empty($lastScrapeSummary['gemini_errors_by_type']))
                     <div class="mb-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-xs text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100">
-                        <p class="mb-3 font-black text-sky-950 dark:text-white">Errores Gemini por tipo en este lote:</p>
+                        <p class="mb-3 font-black text-sky-950 dark:text-white">Errores de Claude por tipo en este lote:</p>
                         <div class="flex flex-wrap gap-2">
                             @foreach ($lastScrapeSummary['gemini_errors_by_type'] as $type => $total)
                                 <span class="rounded-full border border-sky-200 bg-white px-3 py-1 font-bold dark:border-sky-500/30 dark:bg-slate-950/40">
@@ -297,12 +297,9 @@
                             <span class="font-semibold text-amber-800 dark:text-amber-100">
                                 Hay {{ $currentGeminiErrors }} previsualizacion(es) con clasificación pendiente en este lote.
                             </span>
-                            <button type="button" wire:click="reanalyzeErrors"
-                                wire:confirm="Se enviarán a Gemini {{ $currentGeminiErrors }} previsualizaciones con error y sin cambios manuales. ¿Continuar?"
-                                wire:loading.attr="disabled" wire:target="reanalyzeErrors"
+                            <button type="button" x-on:click="openConfirmation('reanalyzeErrors')"
                                 class="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-orange-500 to-red-500 px-4 py-2 text-xs font-black text-white shadow-lg shadow-orange-100 transition hover:from-orange-400 hover:to-red-400 dark:shadow-orange-950/30">
-                                <span wire:loading.remove wire:target="reanalyzeErrors">Reanalizar errores</span>
-                                <span wire:loading wire:target="reanalyzeErrors">Reanalizando...</span>
+                                Reanalizar errores
                             </button>
                         </div>
                     </div>
@@ -310,7 +307,7 @@
 
                 @if ($source->scraper_type === 'sicoes')
                     <p class="mb-4 text-xs font-medium text-slate-500 dark:text-slate-400">
-                        En SICOES se generan una o mas previsualizaciones por documento aceptado por Claude. Si un documento contiene cargos de distintas areas, se separa por area para conservar profesiones publicables. Los documentos descartados por empresa, bienes, obra o falta de evidencia no quedan listos para publicar.
+                        En SICOES se generan una o más previsualizaciones por documento aceptado por Claude. Las profesiones explícitas se conservan aunque pertenezcan a áreas distintas. Solo se separan previsualizaciones cuando el documento contiene cargos realmente diferentes y Claude relaciona sus profesiones. Los documentos descartados por empresa, bienes, obra o falta de evidencia no quedan listos para publicar.
                     </p>
                 @else
                     <p class="mb-4 text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -341,7 +338,7 @@
                         @if ($source->scraper_type === 'sicoes')
                             Claude fallo en {{ $lastScrapeSummary['ai_errors'] }} documento(s). Esas previsualizaciones quedaron con error para revision manual y el lote continuo.
                         @else
-                            Gemini fallo en {{ $lastScrapeSummary['gemini_errors'] }} convocatoria(s), se usaron valores por defecto.
+                            Claude falló en {{ $lastScrapeSummary['gemini_errors'] }} convocatoria(s), se usaron valores por defecto.
                         @endif
                     </div>
                 @endif
@@ -516,17 +513,20 @@
                             </button>
                             @if (in_array($source->scraper_type, ['evaluar', 'etalent'], true) && $preview->status !== 'published')
                                 <button type="button"
-                                    wire:click="reanalyzeSelected({{ $preview->id }})"
-                                    wire:confirm="Esta previsualización se enviará nuevamente a Gemini. Los cambios manuales, si existen, se conservarán. ¿Continuar?"
-                                    wire:loading.attr="disabled"
-                                    wire:target="reanalyzeSelected"
+                                    x-on:click="openConfirmation('reanalyzeSelected', {{ $preview->id }})"
                                     class="inline-flex items-center justify-center rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs font-black text-sky-700 transition hover:bg-sky-100 dark:border-sky-400/30 dark:bg-sky-500/10 dark:text-sky-100">
                                     Reanalizar
                                 </button>
                             @endif
+                            @if (in_array((int) $preview->id, $forcePublishablePreviewIds, true))
+                                <button type="button"
+                                    x-on:click="openConfirmation('publishAnyway', {{ $preview->id }})"
+                                    class="inline-flex items-center justify-center rounded-2xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs font-black text-violet-700 transition hover:bg-violet-100 dark:border-violet-400/30 dark:bg-violet-500/10 dark:text-violet-100">
+                                    Publicar de todas formas
+                                </button>
+                            @endif
                             <button type="button"
-                                wire:click="removeFromBatch({{ $preview->id }})"
-                                wire:confirm="¿Quitar esta convocatoria del lote actual?"
+                                x-on:click="openConfirmation('removeFromBatch', {{ $preview->id }})"
                                 class="inline-flex items-center justify-center rounded-2xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs font-black text-red-700 transition hover:border-red-300 hover:bg-red-100 dark:border-red-400/30 dark:bg-red-500/10 dark:text-red-100 dark:hover:bg-red-500/20"
                                 title="Quitar">
                                 <i class="fas fa-trash"></i>
@@ -579,12 +579,38 @@
         @endif
 
         @if ($publishablePreviewCount > 0)
-            <button type="button" x-on:click="confirmPublish"
+            <button type="button" x-on:click="openConfirmation('publishAll')"
                 class="fixed bottom-8 right-8 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-2xl font-black text-white shadow-2xl shadow-orange-300 transition hover:-translate-y-1 hover:from-orange-400 hover:to-red-400 dark:shadow-orange-950/40"
                 title="Subir todas">
                 &uarr;
             </button>
         @endif
+
+        <dialog x-ref="confirmationDialog" x-on:cancel.prevent="closeConfirmation"
+            x-on:close="resetConfirmation"
+            class="w-[min(92vw,32rem)] rounded-3xl border border-slate-200 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/70 dark:border-white/10 dark:bg-slate-900 dark:text-white">
+            <div class="p-6 sm:p-7">
+                <div class="flex items-start gap-4">
+                    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-200">
+                        <i class="fas fa-question"></i>
+                    </span>
+                    <div class="min-w-0">
+                        <h2 class="text-xl font-black" x-text="confirmation.title"></h2>
+                        <p class="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300"
+                            x-text="confirmation.message"></p>
+                    </div>
+                </div>
+                <div class="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <button type="button" x-on:click="closeConfirmation"
+                        class="rounded-2xl border border-slate-300 px-5 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-100 dark:border-white/15 dark:text-slate-100 dark:hover:bg-white/10">
+                        Cancelar
+                    </button>
+                    <button type="button" x-on:click="confirmAction"
+                        class="rounded-2xl bg-gradient-to-r from-orange-500 to-red-500 px-5 py-2.5 text-sm font-black text-white shadow-lg shadow-orange-200 transition hover:from-orange-400 hover:to-red-400 dark:shadow-orange-950/30"
+                        x-text="confirmation.confirmLabel"></button>
+                </div>
+            </div>
+        </dialog>
 
         @if ($showModal)
             <div class="fixed inset-0 z-30 overflow-y-auto" x-cloak>
@@ -597,6 +623,7 @@
                             areas: @js($areas),
                             profesions: @js($profesions),
                             locations: @js($locations),
+                            allowMultiArea: @js($source->scraper_type === 'sicoes'),
                         })"
                         x-on:bot-professions-recalculated.window="syncRecalculatedProfessions($event.detail.ids, $event.detail.areaId)">
                         <div class="flex items-start justify-between gap-4 mb-5">
@@ -901,7 +928,7 @@
                         </div>
 
                         <div class="mb-4">
-                            <x-input-checkbox-block x-model="isProAnnounce" wire:model="form.is_pro">
+                            <x-input-checkbox-block wire:model.live="form.is_pro">
                                 <div class="divide-y ms-6 divide-tbn-secondary">
                                     <div class="w-full mb-2">
                                         <p class="font-medium text-tbn-dark text-md dark:text-tbn-primary">Convocatoria PRO</p>
@@ -931,33 +958,91 @@
     @script
         <script>
             Alpine.data('botPreview', () => ({
-                confirmPublish() {
-                    Swal.fire({
-                        title: "¿Seguro que deseas publicar todas las convocatorias previsualizadas?",
-                        text: "Recien despues de confirmar se crearan o actualizaran convocatorias reales.",
-                        showDenyButton: true,
-                        confirmButtonText: "Subir todas",
-                        confirmButtonColor: '#0284c7',
-                        denyButtonText: "Cancelar",
-                        denyButtonColor: '#485054'
-                    }).then((result) => {
-                        if (result.isConfirmed) {
-                            $wire.publishAll()
-                        }
-                    });
+                confirmation: {
+                    action: null,
+                    id: null,
+                    title: '',
+                    message: '',
+                    confirmLabel: 'Confirmar',
+                },
+                openConfirmation(action, id = null) {
+                    const configurations = {
+                        publishAll: {
+                            title: 'Publicar todas las previsualizaciones',
+                            message: `Se publicaran @js($publishablePreviewCount) previsualizaciones listas del lote actual (estados revisado o editado). Las que tengan error quedan excluidas.`,
+                            confirmLabel: 'Publicar todas',
+                        },
+                        publishAnyway: {
+                            title: 'Publicar de todas formas',
+                            message: '¿Seguro que desea publicar esta convocatoria de todas formas?',
+                            confirmLabel: 'Publicar',
+                        },
+                        removeFromBatch: {
+                            title: 'Quitar del lote',
+                            message: '¿Seguro que desea quitar esta convocatoria del lote actual?',
+                            confirmLabel: 'Quitar',
+                        },
+                        reanalyzeSelected: {
+                            title: 'Reanalizar previsualización',
+                            message: 'La previsualización se enviará nuevamente a Claude. Los cambios manuales se conservarán.',
+                            confirmLabel: 'Reanalizar',
+                        },
+                        reanalyzeErrors: {
+                            title: 'Reanalizar errores',
+                            message: `Se enviarán a Claude ${@js($currentGeminiErrors)} previsualizaciones con error y sin cambios manuales.`,
+                            confirmLabel: 'Reanalizar',
+                        },
+                    };
+                    const configuration = configurations[action];
+
+                    if (!configuration) {
+                        return;
+                    }
+
+                    this.confirmation = { action, id, ...configuration };
+                    this.$refs.confirmationDialog.showModal();
+                },
+                closeConfirmation() {
+                    this.$refs.confirmationDialog?.close();
+                },
+                resetConfirmation() {
+                    this.confirmation = {
+                        action: null,
+                        id: null,
+                        title: '',
+                        message: '',
+                        confirmLabel: 'Confirmar',
+                    };
+                },
+                confirmAction() {
+                    const action = this.confirmation.action;
+                    const id = this.confirmation.id;
+                    this.closeConfirmation();
+
+                    if (action === 'publishAll') {
+                        $wire.publishAll();
+                    } else if (action === 'publishAnyway') {
+                        $wire.publishAnyway(id);
+                    } else if (action === 'removeFromBatch') {
+                        $wire.removeFromBatch(id);
+                    } else if (action === 'reanalyzeSelected') {
+                        $wire.reanalyzeSelected(id);
+                    } else if (action === 'reanalyzeErrors') {
+                        $wire.reanalyzeErrors();
+                    }
                 }
             }))
 
-            Alpine.data('botEditForm', ({ profesions, locations }) => ({
+            Alpine.data('botEditForm', ({ profesions, locations, allowMultiArea = false }) => ({
                 tsArea: null,
                 tsCompany: null,
                 tsProfesions: null,
                 tsLocations: null,
                 quill: null,
                 initializing: true,
-                isProAnnounce: $wire.form.is_pro,
                 currentAreaId: null,
                 areaWarning: '',
+                allowMultiArea,
                 profesions,
                 locations,
                 init() {
@@ -1012,11 +1097,13 @@
                         if ($wire.form.selected_area_id) {
                             this.tsArea.setValue($wire.form.selected_area_id, true);
                             this.currentAreaId = Number($wire.form.selected_area_id);
-                            this.filterProfessionOptions(
-                                this.currentAreaId,
-                                true,
-                                selectedProfessionIds
-                            );
+                            this.allowMultiArea
+                                ? this.replaceProfessionOptions(this.profesions, selectedProfessionIds)
+                                : this.filterProfessionOptions(
+                                    this.currentAreaId,
+                                    true,
+                                    selectedProfessionIds
+                                );
                         }
 
                         this.initializing = false;
@@ -1032,7 +1119,10 @@
                             minDate: "today",
                             time_24hr: false,
                             dateFormat: "Y-m-d H:i",
-                            locale: "es"
+                            locale: "es",
+                            onChange: (selectedDates, dateStr) => {
+                                $wire.set('form.expiration_date', dateStr);
+                            }
                         });
                     });
                 },
@@ -1050,6 +1140,17 @@
                     const compatibleIds = (await $wire.professionsForArea(areaSelected)).map(Number);
                     const currentIds = this.tsProfesions ? this.tsProfesions.getValue().map(Number) : [];
                     const incompatibleIds = currentIds.filter(id => !compatibleIds.includes(id));
+
+                    if (this.allowMultiArea) {
+                        this.currentAreaId = areaSelected;
+                        $wire.form.selected_area_id = areaSelected;
+                        this.replaceProfessionOptions(this.profesions, currentIds);
+                        this.areaWarning = incompatibleIds.length > 0
+                            ? 'SICOES conservará las profesiones explícitas de otras áreas; el área elegida se usará solo como clasificación principal.'
+                            : '';
+                        $wire.form.selected_profession_ids = currentIds;
+                        return;
+                    }
 
                     if (incompatibleIds.length > 0) {
                         const incompatibleNames = this.profesions
@@ -1122,7 +1223,9 @@
                     }
 
                     if (this.tsProfesions) {
-                        selectedAreaId
+                        this.allowMultiArea
+                            ? this.replaceProfessionOptions(this.profesions, selectedIds)
+                            : selectedAreaId
                             ? this.filterProfessionOptions(selectedAreaId, true, selectedIds)
                             : this.replaceProfessionOptions(this.profesions, selectedIds);
                     }
