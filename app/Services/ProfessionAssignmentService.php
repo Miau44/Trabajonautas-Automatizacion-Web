@@ -36,7 +36,9 @@ class ProfessionAssignmentService
         ?string $aiPrimaryAreaName = null,
         float $aiPrimaryAreaConfidence = 0.0,
         ?string $aiPrimaryAreaEvidence = null,
+        string $aiProviderLabel = 'Claude',
     ): array {
+        $aiProviderLabel = trim($aiProviderLabel) ?: 'IA';
         $catalog = $this->professionCatalog();
         $resolved = [];
         $unidentified = [];
@@ -160,7 +162,6 @@ class ProfessionAssignmentService
 
         if ($aiPrimaryAreaName !== '') {
             $area = Area::query()->where('area_name', $aiPrimaryAreaName)->first(['id', 'area_name']);
-            $areaThreshold = (float) config('profession_matching.ai_area_threshold', 0.90);
             $hasResolvedProfessionInArea = $area && collect($resolved)->contains(
                 fn (array $profession): bool => in_array(
                     (int) $area->id,
@@ -170,11 +171,9 @@ class ProfessionAssignmentService
             );
 
             if (! $area) {
-                $reviewReasons[] = 'Gemini seleccionó un área que no pertenece al catálogo autorizado.';
-            } elseif ($aiPrimaryAreaConfidence < $areaThreshold) {
-                $reviewReasons[] = 'La confianza del área principal seleccionada por Gemini es insuficiente.';
+                $reviewReasons[] = "{$aiProviderLabel} seleccionó un área que no pertenece al catálogo autorizado.";
             } elseif (! $hasResolvedProfessionInArea) {
-                $reviewReasons[] = 'El área principal seleccionada por Gemini no contiene ninguna profesión detectada.';
+                $reviewReasons[] = "El área principal seleccionada por {$aiProviderLabel} no contiene ninguna profesión detectada.";
             } else {
                 $validatedAiArea = [
                     'area_id' => (int) $area->id,
@@ -184,6 +183,9 @@ class ProfessionAssignmentService
                 ];
             }
         }
+        $selectedArea = $dominantArea
+            ?? $validatedAiArea
+            ?? collect($areaGroups)->first();
         $expandedProfessionIds = [];
         $expandedAreas = [];
         $excludedAffinityAreas = [];
@@ -202,10 +204,11 @@ class ProfessionAssignmentService
 
             if ($explicitAreaIds->isEmpty()) {
                 $reviewReasons[] = 'Se mencionan carreras afines, pero las profesiones detectadas no tienen áreas relacionadas para expandir.';
+            } elseif (! $selectedArea || (int) ($selectedArea['area_id'] ?? 0) <= 0) {
+                $reviewReasons[] = 'Se mencionan carreras afines, pero no se pudo seleccionar un área principal para expandir.';
             } else {
                 $areasForExpansion = Area::query()
-                    ->whereIn('id', $explicitAreaIds->all())
-                    ->orderBy('id')
+                    ->whereKey((int) $selectedArea['area_id'])
                     ->get(['id', 'area_name']);
                 $excludedAreaIds = $this->affinityExpansionExcludedAreaIds($catalog);
                 $resolvedIds = collect($resolved)
@@ -284,7 +287,7 @@ class ProfessionAssignmentService
         }
 
         if ($detectedProfessions === []) {
-            $reviewReasons[] = 'Gemini no detectó ninguna profesión explícita.';
+            $reviewReasons[] = "{$aiProviderLabel} no detectó ninguna profesión explícita.";
         }
         if ($resolved === []) {
             $reviewReasons[] = 'No se pudo resolver ninguna profesión contra el catálogo.';
@@ -294,9 +297,6 @@ class ProfessionAssignmentService
         }
         if ($ambiguous !== []) {
             $reviewReasons[] = 'Existen coincidencias ambiguas que requieren decisión humana.';
-        }
-        if (count($areaGroups) > 1 && $dominantArea === null && $validatedAiArea === null) {
-            $reviewReasons[] = 'La convocatoria incluye profesiones pertenecientes a varias áreas sin un área dominante.';
         }
         if (collect($resolved)->contains(fn (array $item): bool => $item['area_ids'] === [])) {
             $reviewReasons[] = 'Una profesión resuelta no tiene áreas relacionadas en el catálogo.';
@@ -330,7 +330,7 @@ class ProfessionAssignmentService
             'profession_names' => $professionNames,
             'area_ids' => $areaIds,
             'area_names' => $areaNames,
-            'selected_area_id' => $validatedAiArea['area_id'] ?? ($dominantArea['area_id'] ?? null),
+            'selected_area_id' => $selectedArea['area_id'] ?? null,
             'valid' => $professionIds !== [] && $reviewReasons === [],
             'error' => $reviewReasons !== [] ? implode(' ', $reviewReasons) : null,
             'catalog_fingerprint' => $this->catalogFingerprint(),
@@ -758,7 +758,7 @@ class ProfessionAssignmentService
                 'status' => 'unidentified',
                 'confidence' => 0.0,
                 'candidates' => [],
-                'reason' => 'Gemini seleccionó un nombre que no pertenece al catálogo autorizado.',
+                'reason' => 'Claude seleccionó un nombre que no pertenece al catálogo autorizado.',
             ];
         }
 

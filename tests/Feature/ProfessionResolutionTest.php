@@ -125,7 +125,7 @@ class ProfessionResolutionTest extends TestCase
         $this->assertSame($this->administrative->id, $result['selected_area_id']);
     }
 
-    public function test_professions_from_three_areas_require_manual_review_without_losing_matches(): void
+    public function test_professions_from_three_areas_keep_all_matches_without_requiring_review(): void
     {
         $result = $this->resolve([
             'Psicología',
@@ -135,8 +135,8 @@ class ProfessionResolutionTest extends TestCase
 
         $this->assertCount(3, $result['profession_ids']);
         $this->assertCount(3, $result['areas_detectadas']);
-        $this->assertNull($result['selected_area_id']);
-        $this->assertTrue($result['requiere_revision']);
+        $this->assertSame($this->social->id, $result['selected_area_id']);
+        $this->assertFalse($result['requiere_revision']);
     }
 
     public function test_configured_alias_resolves_public_accountant(): void
@@ -219,7 +219,7 @@ class ProfessionResolutionTest extends TestCase
         $this->assertFalse($result['requiere_revision']);
     }
 
-    public function test_affinity_expands_every_area_of_all_explicit_professions(): void
+    public function test_affinity_expands_only_the_principal_area_and_keeps_all_explicit_professions(): void
     {
         $result = $this->service->resolveDetectedProfessions(
             [
@@ -235,17 +235,12 @@ class ProfessionResolutionTest extends TestCase
             $this->professions['Trabajo Social']->id,
             $this->professions['Psicología']->id,
             $this->professions['Administración de Empresas']->id,
-            $this->professions['Contaduría']->id,
-            $this->professions['Economía']->id,
-            $this->professions['Ingeniería Financiera']->id,
             $this->professions['Ingeniería de Sistemas']->id,
-            $this->professions['Ciencia de Datos']->id,
         ], $result['profession_ids']);
-        $this->assertEqualsCanonicalizing([
-            $this->social->id,
-            $this->administrative->id,
-            $this->technology->id,
-        ], collect($result['areas_expandidas_por_afinidad'])->pluck('area_id')->all());
+        $this->assertSame(
+            [$this->social->id],
+            collect($result['areas_expandidas_por_afinidad'])->pluck('area_id')->all(),
+        );
         $this->assertTrue($result['expansion_afinidad_aplicada']);
     }
 
@@ -270,10 +265,7 @@ class ProfessionResolutionTest extends TestCase
             [$this->social->id],
             collect($result['areas_expandidas_por_afinidad'])->pluck('area_id')->all(),
         );
-        $this->assertEqualsCanonicalizing(
-            [$this->uncommon->id, $this->agronomic->id],
-            collect($result['areas_omitidas_por_afinidad'])->pluck('area_id')->all(),
-        );
+        $this->assertSame([], $result['areas_omitidas_por_afinidad']);
     }
 
     public function test_ai_catalog_names_resolve_generic_financial_and_economic_mentions_without_aliases(): void

@@ -132,6 +132,64 @@ class SicoesProfessionResolutionTest extends TestCase
         $this->assertSame('alias', $resolution['profesiones_resueltas'][0]['tipo_coincidencia']);
     }
 
+    public function test_sicoes_review_reasons_identify_claude_instead_of_gemini(): void
+    {
+        $resolution = app(ProfessionAssignmentService::class)->resolveDetectedProfessions(
+            [],
+            aiProviderLabel: 'Claude',
+        );
+
+        $this->assertContains('Claude no detectó ninguna profesión explícita.', $resolution['motivos_revision']);
+        $this->assertStringNotContainsString('Gemini', implode(' ', $resolution['motivos_revision']));
+    }
+
+    public function test_multiarea_professions_use_claude_primary_area_without_losing_professions_or_blocking(): void
+    {
+        $resolution = app(ProfessionAssignmentService::class)->resolveDetectedProfessions(
+            [
+                $this->detected('Trabajo Social'),
+                $this->detected('Contaduría Pública'),
+            ],
+            false,
+            null,
+            'Área SOCIAL',
+            0.55,
+            'El cargo y sus funciones son principalmente sociales.',
+            'Claude',
+        );
+
+        $this->assertEqualsCanonicalizing(
+            [$this->socialWork->id, $this->accounting->id],
+            $resolution['profession_ids'],
+        );
+        $this->assertSame($this->social->id, $resolution['selected_area_id']);
+        $this->assertFalse($resolution['requiere_revision']);
+    }
+
+    public function test_affinity_expands_only_the_primary_area_selected_by_claude(): void
+    {
+        $resolution = app(ProfessionAssignmentService::class)->resolveDetectedProfessions(
+            [
+                $this->detected('Trabajo Social'),
+                $this->detected('Contaduría Pública'),
+            ],
+            true,
+            'Trabajo Social, Contaduría Pública o ramas afines.',
+            'Área ADMINISTRATIVA',
+            0.60,
+            'Las funciones administrativas son las más representativas.',
+            'Claude',
+        );
+
+        $this->assertContains($this->socialWork->id, $resolution['profession_ids']);
+        $this->assertCount(4, $resolution['profession_ids']);
+        $this->assertSame(
+            [$this->administrative->id],
+            collect($resolution['areas_expandidas_por_afinidad'])->pluck('area_id')->all(),
+        );
+        $this->assertSame($this->administrative->id, $resolution['selected_area_id']);
+    }
+
     private function profession(string $name, Area $area): Profesion
     {
         $profession = Profesion::create(['profesion_name' => $name]);
