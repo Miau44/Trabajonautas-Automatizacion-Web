@@ -417,8 +417,13 @@ class CompanySeeder extends Seeder
             [399, 'INE \"Instituto Nacional de Estadística\"', 'Institución pública descentralizada bajo tuición del Ministerio de Planificación del Desarrollo, legalmente constituida como el órgano ejecutivo del Sistema Nacional de Información Estadística (SNIE) de Bolivia. Es la única entidad con la facultad legal para producir, normar y difundir las estadísticas oficiales del Estado Plurinacional.', 'empresas/5ZAz4nxOml1CZELOGJLhcESIMyEytH7PAcuz3nKJ.jpg', 'a19b1393-44ca-405a-a2c4-3df51dd4f0e9', 1]
         ];
 
-        $this->admin_id = User::where('email', 'ricardooropeza15@gmail.com')->first()->id;
-        if (!$this->admin_id) return;
+        $adminEmail = config('trabajonautas.seed_users.admin.email');
+        $admin = $adminEmail ? User::where('email', $adminEmail)->first() : null;
+        if (! $admin) {
+            return;
+        }
+
+        $this->admin_id = $admin->id;
 
         $companies = array_map(function ($company) {
             return [

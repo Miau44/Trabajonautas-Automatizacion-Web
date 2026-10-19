@@ -1,66 +1,144 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Trabajonautas Automatización Web
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Aplicación local en Laravel para recopilar y revisar convocatorias. El scraping y las previsualizaciones se guardan en la base de datos local de cada PC. Al publicar, la aplicación se conecta a la base de datos del sitio y, cuando hay adjuntos, los transfiere por FTPS explícito.
 
-## About Laravel
+## Requisitos para Windows
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- Git para Windows.
+- Laragon con PHP 8.1 o posterior y MySQL/MariaDB. Se recomienda PHP 8.3.
+- Composer 2.
+- Node.js 18 o posterior y npm. SICOES requiere Node.js 18+.
+- Chrome o Microsoft Edge para el flujo del navegador de SICOES.
+- `pdftotext` (Poppler) para extraer texto de PDF de SICOES. Si no está en `PATH`, se configura su ruta en `SICOES_PDFTOTEXT_PATH`.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Comprueba que las herramientas estén disponibles en PowerShell:
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+```powershell
+git --version
+php -v
+composer --version
+node --version
+npm --version
+```
 
-## Learning Laravel
+Si `php` no se reconoce, usa la terminal de Laragon o añade al `PATH` la carpeta de la versión de PHP instalada en `C:\laragon\bin\php\`.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Descargar el proyecto
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+Clona la rama compartida desde PowerShell:
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+```powershell
+cd C:\laragon\www
+git clone --branch integrar-scraper-sicoes https://github.com/Miau44/Trabajonautas-Automatizacion-Web.git
+cd Trabajonautas-Automatizacion-Web
+```
 
-## Laravel Sponsors
+El repositorio debe estar compartido con la cuenta de GitHub del compañero. Para actualizar una copia existente:
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+```powershell
+git pull origin integrar-scraper-sicoes
+```
 
-### Premium Partners
+## Instalar dependencias
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+Desde la carpeta del proyecto:
 
-## Contributing
+```powershell
+composer install
+npm install
+npm run build
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Crear el `.env` local
 
-## Code of Conduct
+Crea el archivo a partir de la plantilla:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```powershell
+Copy-Item .env.example .env
+```
 
-## Security Vulnerabilities
+Abre `.env` y completa los valores para esa PC. Genera una clave propia para la instalación:
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```powershell
+php artisan key:generate
+```
 
-## License
+No copies el `.env` de otra computadora ni lo subas al repositorio. Cada PC debe tener su propio `APP_KEY`, su configuración local y credenciales protegidas.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+### Variables principales
+
+`.env.example` es la plantilla completa y la lista de referencia de todas las variables del proyecto. En una instalación normal revisa estos grupos:
+
+| Variables | Para qué sirven | Cuándo se necesitan |
+| --- | --- | --- |
+| `APP_NAME`, `APP_ENV`, `APP_DEBUG`, `APP_URL` | Configuración de Laravel | Siempre; en la PC de oficina se usa normalmente `local` y `http://127.0.0.1:8000`. |
+| `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | Base de datos local de esa PC | Siempre. No se debe apuntar aquí a la base productiva del sitio. |
+| `SEED_ADMIN_NAME`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `SEED_ADMIN_PHONE` | Cuenta administradora local inicial | Para crear el administrador cuando se ejecuta el seeder por primera vez. Usa una contraseña nueva y segura. |
+| `ANTHROPIC_API_KEY` y `ANTHROPIC_MODEL` | Análisis de convocatorias con Claude | Si se utilizarán las funciones de análisis con IA. La clave consume la cuenta/cupo al que pertenece. |
+| `SICOES_NODE_PATH`, `SICOES_BROWSER_PATH`, `SICOES_PDFTOTEXT_PATH` | Rutas locales de Node, Chrome/Edge y `pdftotext` | Solo si no se detectan automáticamente o el scraper lo requiere. Déjalas vacías si se encuentran por `PATH` o en las rutas conocidas. |
+| `SITE_DB_HOST`, `SITE_DB_PORT`, `SITE_DB_DATABASE`, `SITE_DB_USERNAME`, `SITE_DB_PASSWORD` | Conexión remota a la base existente del sitio | Solo para sincronizar empresas y publicar. El host debe ser la IP pública del VPS, no `127.0.0.1`. El administrador debe autorizar la IP pública de la oficina. |
+| `SITE_FILES_HOST`, `SITE_FILES_PORT`, `SITE_FILES_USERNAME`, `SITE_FILES_PASSWORD`, `SITE_FILES_ROOT` | Transferencia de archivos por FTPS explícito | Necesarias si se publicarán convocatorias con PDF o imágenes. `SITE_FILES_ROOT` debe ser la ruta FTP absoluta que corresponde a `storage/app/public` en el servidor. |
+
+Las demás opciones están documentadas como nombres y valores predeterminados en `.env.example`. No agregues contraseñas, claves API, tokens ni datos de producción a ese archivo de ejemplo.
+
+### ¿Qué configuración se comparte por privado?
+
+No le envíes el archivo `.env` completo. Puede incluir la clave de Laravel, credenciales de la base local, API keys y accesos productivos. Comparte solo los valores estrictamente necesarios por un canal privado y seguro; es preferible que el responsable de cada servicio configure las claves directamente en cada PC.
+
+- La cuenta local de MySQL/MariaDB se crea y configura para cada PC.
+- `APP_KEY` se genera en cada PC con `php artisan key:generate`; no se comparte.
+- La clave de Claude debe entregarla/configurarla quien administre esa cuenta, teniendo en cuenta que todas las PCs usarían su cuota.
+- Las credenciales `SITE_DB_*` y `SITE_FILES_*` permiten acceder a sistemas del sitio. Deben entregarse solo a usuarios autorizados, no enviarse por un chat grupal y no guardarse en GitHub.
+- La IP autorizada por el VPS debe ser la IP pública de salida de la oficina, no una IPv4 privada como `192.168.x.x`. Si cambia la IP pública, el administrador debe actualizar la regla.
+
+## Crear la base local
+
+En Laragon, inicia MySQL/MariaDB y crea una base vacía con el nombre indicado por `DB_DATABASE` en el `.env`. Después ejecuta las migraciones y los datos iniciales locales:
+
+```powershell
+php artisan migrate --seed
+php artisan storage:link
+```
+
+Configura `SEED_ADMIN_*` antes de `migrate --seed`. El administrador creado usará el correo y contraseña puestos allí. El seeder también carga catálogos locales; al abrir la sección del bot, el catálogo de empresas se sincroniza desde la web cuando `SITE_DB_*` está configurado.
+
+**No ejecutes migraciones ni seeders contra la base remota del sitio.** Los valores `DB_*` deben apuntar a MySQL local; la conexión `SITE_DB_*` solo se usa para las operaciones de catálogo/publicación existentes.
+
+## Levantar la aplicación
+
+En una terminal abierta en la carpeta del proyecto:
+
+```powershell
+php artisan serve
+```
+
+Abre la dirección que indique Laravel, normalmente <http://127.0.0.1:8000>. Mantén esa terminal abierta mientras se usa el sistema. Si se actualizó `.env` y Laravel conserva configuración anterior, ejecuta:
+
+```powershell
+php artisan config:clear
+```
+
+## Scraping y publicación
+
+- Cada PC scrapea y guarda sus previsualizaciones en su propia base `DB_*`.
+- `SITE_DB_*` permite leer el catálogo remoto y escribir anuncios en las tablas existentes del sitio cuando se pulsa publicar.
+- La acción **Publicar todas** procesa las previsualizaciones revisadas/editadas del lote actual; revisa el lote antes de confirmar.
+- La misma URL de origen se reconoce para evitar crear otra fila para esa misma fuente.
+- Si una convocatoria incluye archivos, deben subirse al servidor antes de que se considere publicada correctamente. La PC debe tener FTPS explícito con TLS habilitado y la ruta correcta en `SITE_FILES_ROOT`.
+
+Si FTPS responde `500` al comando `AUTH TLS`, el servidor aún no está aceptando FTPS explícito para esa cuenta. El administrador del VPS debe habilitarlo, configurar sus puertos pasivos y proporcionar la ruta FTP correspondiente a `storage/app/public`. No se debe publicar una convocatoria con adjuntos hasta que la transferencia esté funcionando.
+
+## Solución de problemas
+
+- `php` no se reconoce: abre una terminal de Laragon o configura el `PATH` de PHP.
+- Error de conexión a `DB_*`: confirma que MySQL está iniciado y que el nombre de base/usuario/contraseña son los locales de esta PC.
+- No aparecen empresas web: revisa `SITE_DB_*`, la conectividad desde la oficina y que la IP pública esté permitida por el VPS.
+- Claude no está disponible: revisa que `ANTHROPIC_API_KEY` esté configurada en `.env` y limpia la caché de configuración.
+- SICOES no inicia: confirma Node.js 18+, un navegador Chrome/Edge instalado y que `pdftotext` esté disponible si se requiere extraer PDFs.
+- Los archivos no se publican: verifica FTPS explícito sobre TLS, los puertos pasivos y `SITE_FILES_ROOT` con el administrador del VPS.
+
+## Seguridad
+
+- `.env` está excluido de Git; conserva esa protección.
+- Nunca publiques `.env`, contraseñas, claves API, archivos de certificados privados ni respaldos de bases productivas.
+- Si una credencial se compartió por error, rótala en el servicio que la emitió y actualiza las PCs autorizadas.
