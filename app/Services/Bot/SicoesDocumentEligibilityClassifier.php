@@ -57,6 +57,7 @@ class SicoesDocumentEligibilityClassifier
             }
 
             $product = str_contains($individualSignal, 'producto');
+            $personnelRequirement = ($document['source_type'] ?? null) === 'personnel_requirements';
             $multiple = preg_match('/\bitem\s+1\b.*\bitem\s+2\b/s', $searchable) === 1
                 || Str::contains($searchable, [
                     'consultores individuales de linea',
@@ -68,7 +69,9 @@ class SicoesDocumentEligibilityClassifier
                 'decision' => 'eligible',
                 'eligible' => true,
                 'contract_type' => $multiple ? 'multiple_individual' : ($product ? 'individual_product' : 'individual'),
-                'tipo_oportunidad' => $product ? 'consultor_producto' : 'consultor_linea',
+                'tipo_oportunidad' => $personnelRequirement
+                    ? 'requerimiento_personal'
+                    : ($product ? 'consultor_producto' : 'consultor_linea'),
                 'reason' => null,
                 'evidence' => "Senal explicita en el documento: {$individualSignal}.",
             ];
@@ -175,16 +178,14 @@ class SicoesDocumentEligibilityClassifier
             return $analysis;
         }
 
-        $type = (string) ($analysis['tipo_oportunidad'] ?? 'no_determinado');
-        if (! in_array($type, ['consultor_linea', 'consultor_producto', 'consultoria_individual'], true)) {
-            return $analysis;
-        }
-
         $analysis['eligible'] = true;
         $analysis['contract_type'] = $classification['contract_type'];
+        $analysis['tipo_oportunidad'] = $classification['tipo_oportunidad'];
         $analysis['es_oportunidad_consultor_persona'] = true;
         $analysis['debe_descartarse'] = false;
         $analysis['motivo_descarte'] = null;
+        $analysis['evidencia_clasificacion'] = ($analysis['evidencia_clasificacion'] ?? '')
+            ?: (string) ($classification['evidence'] ?? '');
 
         return $analysis;
     }

@@ -318,14 +318,16 @@ class SicoesDocumentImporterService
         }
 
         $isPersonnelRequirement = ($document['source_type'] ?? null) === 'personnel_requirements';
-        $preclassification = $isPersonnelRequirement
-            ? [
+        $preclassification = $this->eligibilityClassifier->classify($document, $textResult['text']);
+        if ($isPersonnelRequirement && ($preclassification['decision'] ?? null) !== 'eligible') {
+            $preclassification = [
                 'decision' => 'review',
                 'reason' => 'Publicación del apartado oficial Requerimientos de Personal.',
                 'tipo_oportunidad' => 'requerimiento_personal',
                 'source' => 'sicoes_personnel_listing',
-            ]
-            : $this->eligibilityClassifier->classify($document, $textResult['text']);
+                'evidence' => $preclassification['evidence'] ?? (string) ($document['title'] ?? ''),
+            ];
+        }
         $analysis = null;
 
         if (($preclassification['decision'] ?? null) === 'rejected') {
@@ -395,6 +397,15 @@ class SicoesDocumentImporterService
         }
 
         $analysis['data'] = $this->eligibilityClassifier->reconcile($analysis['data'], $preclassification);
+
+        if ($isPersonnelRequirement) {
+            $analysis['data']['tipo_oportunidad'] = 'requerimiento_personal';
+            $analysis['data']['eligible'] = true;
+            $analysis['data']['es_oportunidad_consultor_persona'] = true;
+            $analysis['data']['es_consultoria_individual'] = true;
+            $analysis['data']['debe_descartarse'] = false;
+            $analysis['data']['motivo_descarte'] = null;
+        }
 
         $data = $analysis['data'];
         $this->recordBatchItem($batchId, $document, [
@@ -1119,6 +1130,8 @@ class SicoesDocumentImporterService
             'used' => (bool) ($analysis['used'] ?? false),
             'cache_hit' => (bool) ($analysis['cache_hit'] ?? false),
             'preclassified' => (bool) ($analysis['preclassified'] ?? false),
+            'error_type' => $analysis['error_type'] ?? null,
+            'validation_errors' => array_slice((array) ($analysis['ai_validation_errors'] ?? []), 0, 12),
             'analyzed_at' => $analysis['analyzed_at'] ?? null,
             'attempts' => $analysis['ai_attempts'] ?? $analysis['anthropic_attempts'] ?? null,
             'input_tokens' => $analysis['ai_prompt_tokens'] ?? $analysis['anthropic_input_tokens'] ?? null,
