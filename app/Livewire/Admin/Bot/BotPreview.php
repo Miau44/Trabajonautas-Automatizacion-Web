@@ -283,6 +283,13 @@ class BotPreview extends Component
     {
         $preview = $this->batchPreviewsQuery()->findOrFail($this->editingId);
 
+        if ($this->source->scraper_type === 'sicoes' && is_string($this->form['salary'])) {
+            $formattedSalary = trim($this->form['salary']);
+            if (preg_match('/^\d{1,3}(?:\.\d{3})+$/', $formattedSalary) === 1) {
+                $this->form['salary'] = str_replace('.', '', $formattedSalary);
+            }
+        }
+
         if ($this->source->scraper_type === 'sicoes' && empty($this->form['selected_area_id'])) {
             $this->form['selected_area_id'] = $this->selectedAreaIdForEditing($preview);
         }

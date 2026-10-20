@@ -163,11 +163,34 @@ class SiteAnnouncementPublisher
         }
 
         $catalog = $db->table($table)->get(['id', $nameColumn]);
-        $byName = $catalog->keyBy(fn ($item): string => $this->normalize((string) $item->{$nameColumn}));
+        $byName = $catalog->groupBy(fn ($item): string => $this->normalize((string) $item->{$nameColumn}));
         $ids = [];
         $missing = [];
         foreach ($wanted as $name) {
-            $item = $byName->get($this->normalize($name));
+            $item = $byName->get($this->normalize($name))?->first();
+
+            if (! $item) {
+                $wantedTokens = collect(explode(' ', $this->normalize($name)))
+                    ->reject(fn (string $token): bool => in_array($token, ['y', 'e', 'de', 'del', 'la', 'el', 'en'], true))
+                    ->unique()
+                    ->values();
+
+                if ($wantedTokens->count() >= 3) {
+                    $candidates = $catalog->filter(function ($candidate) use ($wantedTokens, $nameColumn): bool {
+                        $candidateTokens = collect(explode(' ', $this->normalize((string) $candidate->{$nameColumn})))
+                            ->reject(fn (string $token): bool => in_array($token, ['y', 'e', 'de', 'del', 'la', 'el', 'en'], true))
+                            ->unique();
+
+                        return $candidateTokens->count() > $wantedTokens->count()
+                            && $wantedTokens->diff($candidateTokens)->isEmpty();
+                    })->values();
+
+                    if ($candidates->count() === 1) {
+                        $item = $candidates->first();
+                    }
+                }
+            }
+
             if (! $item) {
                 $missing[] = $name;
                 continue;
@@ -247,7 +270,7 @@ class SiteAnnouncementPublisher
             ->distinct()
             ->pluck('users.id');
 
-        $configuredId = trim((string) config('site_publishing.user_id'));
+        $configuredId = trim((string) config('services.site_publishing.user_id'));
         if ($configuredId !== '') {
             if (! $admins->contains($configuredId)) {
                 throw new RuntimeException('El usuario configurado para publicar no es un administrador activo del sitio.');
@@ -268,7 +291,7 @@ class SiteAnnouncementPublisher
 
     private function resolveAnnouncementTypeId(Connection $db): ?int
     {
-        $slug = trim((string) config('site_publishing.announcement_type_slug'));
+        $slug = trim((string) config('services.site_publishing.announcement_type_slug'));
         if ($slug === '') {
             return null;
         }
@@ -309,7 +332,7 @@ class SiteAnnouncementPublisher
             return [];
         }
 
-        $settings = (array) config('site_publishing.files', []);
+        $settings = (array) config('services.site_publishing.files', []);
         $password = (string) ($settings['password'] ?? '');
         $root = rtrim(str_replace('\\', '/', trim((string) $settings['root'])), '/');
         return $this->transferAttachments($settings, $root, $attachments, (string) $preview->source_url);
@@ -321,7 +344,7 @@ class SiteAnnouncementPublisher
             return;
         }
 
-        $settings = (array) config('site_publishing.files', []);
+        $settings = (array) config('services.site_publishing.files', []);
         foreach (['host', 'username', 'password', 'root'] as $key) {
             if (trim((string) ($settings[$key] ?? '')) === '') {
                 throw new RuntimeException('Publicacion cancelada: falta configurar el acceso de archivos del sitio (SITE_FILES_*).');

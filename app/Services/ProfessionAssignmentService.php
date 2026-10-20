@@ -44,6 +44,8 @@ class ProfessionAssignmentService
         $unidentified = [];
         $ambiguous = [];
         $ignoredAffinityExpressions = [];
+        $ignoredAcademicRequirements = [];
+        $broadAreaEvidence = [];
         $reviewReasons = [];
 
         foreach ($detectedProfessions as $detected) {
@@ -56,6 +58,29 @@ class ProfessionAssignmentService
             $evidence = trim((string) ($detected['evidencia'] ?? ''));
             $requirementType = (string) ($detected['tipo_requisito'] ?? 'obligatoria');
             $aiConfidence = $this->confidence($detected['confianza'] ?? 0);
+
+            $broadRules = $this->broadAreaRulesForText($originalName.' '.$evidence);
+            if ($broadRules !== []) {
+                $broadAreaEvidence[] = [
+                    'nombre_original' => $originalName,
+                    'evidencia' => $evidence,
+                    'reglas' => $broadRules,
+                ];
+            }
+
+            if ($this->isAcademicDegreeRequirement($originalName, $evidence)) {
+                $ignoredAcademicRequirements[] = [
+                    'nombre_original' => $originalName,
+                    'evidencia' => $evidence,
+                    'motivo' => 'Requisito de grado académico, no una carrera para clasificar.',
+                ];
+
+                continue;
+            }
+
+            if ($broadRules !== []) {
+                continue;
+            }
 
             if ($originalName === '' || $evidence === '') {
                 $unidentified[] = [
@@ -93,6 +118,44 @@ class ProfessionAssignmentService
             ];
 
             if ($match['status'] === 'unidentified') {
+                $approximate = $this->closestApproximateMatch($originalName, $catalog);
+                if ($approximate !== null) {
+                    $profession = $approximate['profession'];
+                    $professionId = (int) $profession->id;
+                    $entry = [
+                        'profesion_id' => $professionId,
+                        'profesion_name' => $profession->profesion_name,
+                        ...$base,
+                        'nombres_originales' => [$originalName],
+                        'evidencias' => [$evidence],
+                        'confianza_coincidencia' => $approximate['confidence'],
+                        'tipo_coincidencia' => 'aproximada',
+                        'alias_utilizado' => $approximate['alias'],
+                        'agregada_por_afinidad' => false,
+                        'area_ids' => $profession->areas->pluck('id')->map(fn ($id): int => (int) $id)->values()->all(),
+                        'areas' => $profession->areas->map(fn (Area $area): array => [
+                            'area_id' => (int) $area->id,
+                            'area_name' => $area->area_name,
+                        ])->values()->all(),
+                        'asignacion_aproximada' => true,
+                    ];
+                    $resolved[$professionId] = $entry;
+                    $ambiguous[] = [
+                        ...$base,
+                        'confianza_coincidencia' => $approximate['confidence'],
+                        'candidatos' => [[
+                            'profesion_id' => $professionId,
+                            'profesion_name' => $profession->profesion_name,
+                            'confianza_coincidencia' => $approximate['confidence'],
+                        ]],
+                        'motivo' => 'Asignación aproximada de respaldo; verificar la carrera sugerida.',
+                        'asignacion_aplicada' => true,
+                    ];
+                    $reviewReasons[] = 'Se asignó una carrera cercana como aproximación; verifica que corresponda al requisito.';
+
+                    continue;
+                }
+
                 $unidentified[] = [
                     ...$base,
                     'confianza_coincidencia' => $match['confidence'],
@@ -151,6 +214,60 @@ class ProfessionAssignmentService
             }
 
             $resolved[$professionId] = $entry;
+        }
+
+        foreach ($broadAreaEvidence as $broadEvidence) {
+            foreach ($broadEvidence['reglas'] as $rule) {
+                $areas = Area::query()->orderBy('id')->get(['id', 'area_name'])
+                    ->filter(fn (Area $area): bool => $this->areaMatchesBroadRule($area->area_name, $rule));
+
+                foreach ($areas as $area) {
+                    $areaProfessions = $catalog->filter(
+                        fn (Profesion $profession): bool => $profession->areas->contains(
+                            fn (Area $professionArea): bool => (int) $professionArea->id === (int) $area->id,
+                        ),
+                    );
+
+                    foreach ($areaProfessions as $profession) {
+                        $professionId = (int) $profession->id;
+                        $originalName = (string) $broadEvidence['nombre_original'];
+                        $evidence = (string) $broadEvidence['evidencia'];
+
+                        if (isset($resolved[$professionId])) {
+                            $resolved[$professionId]['nombres_originales'] = array_values(array_unique([
+                                ...$resolved[$professionId]['nombres_originales'], $originalName,
+                            ]));
+                            $resolved[$professionId]['evidencias'] = array_values(array_unique([
+                                ...$resolved[$professionId]['evidencias'], $evidence,
+                            ]));
+
+                            continue;
+                        }
+
+                        $resolved[$professionId] = [
+                            'profesion_id' => $professionId,
+                            'profesion_name' => $profession->profesion_name,
+                            'nombre_original' => $originalName,
+                            'nombre_catalogo_ia' => null,
+                            'evidencia' => $evidence,
+                            'tipo_requisito' => 'alternativa',
+                            'confianza_ia' => 1.0,
+                            'nombres_originales' => [$originalName],
+                            'evidencias' => [$evidence],
+                            'confianza_coincidencia' => 1.0,
+                            'tipo_coincidencia' => 'expansion_area_amplia',
+                            'alias_utilizado' => null,
+                            'agregada_por_afinidad' => true,
+                            'area_ids' => $profession->areas->pluck('id')->map(fn ($id): int => (int) $id)->values()->all(),
+                            'areas' => $profession->areas->map(fn (Area $professionArea): array => [
+                                'area_id' => (int) $professionArea->id,
+                                'area_name' => $professionArea->area_name,
+                            ])->values()->all(),
+                            'area_amplia' => $rule,
+                        ];
+                    }
+                }
+            }
         }
 
         $resolved = array_values($resolved);
@@ -286,16 +403,16 @@ class ProfessionAssignmentService
             }
         }
 
-        if ($detectedProfessions === []) {
+        if ($detectedProfessions === [] && $broadAreaEvidence === []) {
             $reviewReasons[] = "{$aiProviderLabel} no detectó ninguna profesión explícita.";
         }
-        if ($resolved === []) {
+        if ($resolved === [] && $broadAreaEvidence === []) {
             $reviewReasons[] = 'No se pudo resolver ninguna profesión contra el catálogo.';
         }
-        if ($unidentified !== []) {
+        if ($unidentified !== [] && $resolved === []) {
             $reviewReasons[] = 'Existen profesiones no identificadas en el catálogo.';
         }
-        if ($ambiguous !== []) {
+        if ($ambiguous !== [] && $resolved === []) {
             $reviewReasons[] = 'Existen coincidencias ambiguas que requieren decisión humana.';
         }
         if (collect($resolved)->contains(fn (array $item): bool => $item['area_ids'] === [])) {
@@ -306,13 +423,28 @@ class ProfessionAssignmentService
         $professionIds = collect($resolved)->pluck('profesion_id')->map(fn ($id): int => (int) $id)->values()->all();
         $professionNames = collect($resolved)->pluck('profesion_name')->values()->all();
         $areaIds = collect($areaGroups)->pluck('area_id')->map(fn ($id): int => (int) $id)->values()->all();
-        $areaNames = collect($areaGroups)->pluck('area_name')->values()->all();
+        $areaNames = $broadAreaEvidence !== []
+            ? collect($broadAreaEvidence)
+                ->flatMap(fn (array $item): array => $item['reglas'])
+                ->unique()
+                ->map(fn (string $rule): string => match ($rule) {
+                    'salud' => 'Ciencias de la salud',
+                    'economia_administracion' => 'Ciencias económicas y administrativas',
+                    'tecnologia_agronomia' => 'Ciencias tecnológicas y agrarias',
+                    'social_humanidades' => 'Ciencias sociales y humanísticas',
+                    default => $rule,
+                })
+                ->values()
+                ->all()
+            : collect($areaGroups)->pluck('area_name')->values()->all();
 
         return [
             'profesiones_resueltas' => $resolved,
             'profesiones_no_identificadas' => $unidentified,
             'profesiones_ambiguas' => $ambiguous,
             'expresiones_afinidad_ignoradas' => $ignoredAffinityExpressions,
+            'grados_academicos_ignorados' => $ignoredAcademicRequirements,
+            'areas_amplias_detectadas' => $broadAreaEvidence,
             'acepta_carreras_afines' => $expandRelatedArea,
             'expansion_afinidad_aplicada' => $expandedAreas !== [],
             'area_expandida_por_afinidad' => count($expandedAreas) === 1
@@ -745,6 +877,81 @@ class ProfessionAssignmentService
         return preg_match('/^ramas?\b/u', $normalized) === 1
             || preg_match('/^(?:carreras?|areas?|especialidades?)\s+afines?\b/u', $normalized) === 1
             || preg_match('/^afines?\b/u', $normalized) === 1;
+    }
+
+    private function isAcademicDegreeRequirement(string $name, string $evidence): bool
+    {
+        $normalizedName = $this->nameNormalizer->normalize($name);
+
+        return preg_match('/^(?:titulo de )?(?:magister|master|maestria|doctorado|phd|grado academico|tecnico superior|tecnica superior|diplomado|diplomada|posgrado|postgrado)(?:\b|$)/u', $normalizedName) === 1
+            || preg_match('/^(?:licenciatura|licenciado|licenciada)(?:\s+con\s+titulo\s+profesional)?$/u', $normalizedName) === 1
+            || (preg_match('/^(?:doctor|doctora)\b/u', $normalizedName) === 1
+                && preg_match('/\b(?:grado academico|doctorado|titulo de doctor)\b/u', $this->nameNormalizer->normalize($evidence)) === 1);
+    }
+
+    private function broadAreaRulesForText(string $text): array
+    {
+        $normalized = $this->nameNormalizer->normalize($text);
+        $rules = [];
+
+        if (preg_match('/\b(?:ciencias? de la salud|area de salud|areas de salud|salud)\b/u', $normalized)) {
+            $rules[] = 'salud';
+        }
+        if (preg_match('/\b(?:ciencias? economicas? y administrativas?|economicas? y administrativas?|economia y administracion|area economica administrativa)\b/u', $normalized)) {
+            $rules[] = 'economia_administracion';
+        }
+        if (preg_match('/\b(?:ciencias? tecnologicas? y agrarias?|tecnologicas? y agrarias?|tecnologia y agronomia|ciencias tecnologicas?)\b/u', $normalized)) {
+            $rules[] = 'tecnologia_agronomia';
+        }
+        if (preg_match('/\b(?:ciencias? sociales? y humanisticas?|sociales? y humanisticas?|ciencias? sociales?|humanisticas?)\b/u', $normalized)) {
+            $rules[] = 'social_humanidades';
+        }
+
+        return array_values(array_unique($rules));
+    }
+
+    private function areaMatchesBroadRule(string $areaName, string $rule): bool
+    {
+        $area = $this->nameNormalizer->normalize($areaName);
+
+        return match ($rule) {
+            'salud' => preg_match('/\b(?:enfermeria|medicina|medic|bioquimica|farmacia|nutricion|dietetica|fisioterapia|kinesiologia|odontologia|biomedica|veterinaria|zootecnia)\b/u', $area) === 1,
+            'economia_administracion' => preg_match('/\b(?:economica|economica|administrativa|administracion|financiera|comercio internacional|marketing)\b/u', $area) === 1,
+            'tecnologia_agronomia' => preg_match('/\b(?:sistemas|informatica|telecomunicaciones|electronica|electromecanica|mecatronica|electrica|industrial|mecanica|petrolera|minera|geodesia|topografia|geom|geologica|geografica|metalurgica|materiales|agronomica|ambiental|estadistica|quimica|civil|construccion|arquitectura)\b/u', $area) === 1,
+            'social_humanidades' => preg_match('/\b(?:social|relaciones internacionales|politica|gestion publica|antropologia|historia|filosofia|educacion|psicologia|psicopedagogia|linguistica|idiomas|comunicacion)\b/u', $area) === 1,
+            default => false,
+        };
+    }
+
+    private function closestApproximateMatch(string $name, Collection $catalog): ?array
+    {
+        $normalized = $this->nameNormalizer->normalize($name);
+        if (mb_strlen($normalized) < 8) {
+            return null;
+        }
+
+        $candidates = $catalog->map(function (Profesion $profession) use ($normalized): array {
+            $names = collect([$profession->profesion_name])
+                ->merge($profession->aliases->pluck('alias_normalizado'))
+                ->filter()
+                ->map(fn (mixed $candidate): float => $this->nameNormalizer->similarity(
+                    $normalized,
+                    (string) $candidate,
+                ));
+
+            return [
+                'profession' => $profession,
+                'confidence' => $names->max() ?? 0.0,
+                'alias' => null,
+            ];
+        })->sortByDesc('confidence')->values();
+
+        $best = $candidates->first();
+        if (! $best || (float) $best['confidence'] < 0.45) {
+            return null;
+        }
+
+        return $best;
     }
 
     private function matchCatalogProfession(string $catalogName, Collection $catalog): array

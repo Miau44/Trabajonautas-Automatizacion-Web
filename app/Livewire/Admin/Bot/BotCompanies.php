@@ -13,6 +13,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -271,6 +272,7 @@ class BotCompanies extends Component
         ]);
 
         $batch = null;
+        $dispatched = false;
 
         try {
             if (config('queue.default') === 'sync') {
@@ -360,6 +362,9 @@ class BotCompanies extends Component
                 $runId,
                 $sourceType,
             )->afterCommit();
+            $dispatched = true;
+
+            $this->ensureSicoesQueueWorker();
 
             $this->message = 'SICOES fue enviado a la cola. El scraper correra en background y mostrara resultados para revisar antes de publicar.';
         } catch (\Throwable $exception) {
@@ -371,7 +376,7 @@ class BotCompanies extends Component
             ];
             $markedAsFailed = false;
 
-            if ($batch) {
+            if ($batch && ! $dispatched) {
                 try {
                     $markedAsFailed = SicoesScrapeBatch::query()
                         ->whereKey($batch->getKey())
@@ -434,7 +439,9 @@ class BotCompanies extends Component
                 'requested_date' => $this->sicoesDate,
                 'failure' => $failure,
             ]);
-            $this->errorMessage = 'SICOES no pudo iniciar la ejecucion. Revisa la configuracion de la cola e intentalo nuevamente.';
+            $this->errorMessage = $dispatched
+                ? 'El trabajo SICOES quedó en cola, pero no se pudo iniciar automáticamente el worker. El lote permanece en espera.'
+                : 'SICOES no pudo iniciar la ejecucion. Revisa la configuracion de la cola e intentalo nuevamente.';
         }
 
         try {
@@ -444,6 +451,73 @@ class BotCompanies extends Component
                 'exception_type' => get_debug_type($refreshException),
             ]);
         }
+    }
+
+    private function ensureSicoesQueueWorker(): void
+    {
+        if (PHP_OS_FAMILY !== 'Windows' || config('queue.default') !== 'database') {
+            return;
+        }
+
+        $artisan = base_path('artisan');
+        $php = PHP_BINARY;
+        if (strtolower(basename($php)) === 'php-cgi.exe') {
+            $cliBinary = dirname($php).DIRECTORY_SEPARATOR.'php.exe';
+            if (is_file($cliBinary)) {
+                $php = $cliBinary;
+            }
+        }
+
+        // Only inspect PHP processes. Matching every process can match this
+        // PowerShell check itself and falsely report an existing worker.
+        $powershell = rtrim((string) (getenv('SystemRoot') ?: 'C:\\Windows'), '\\\\/')
+            .'\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+        if (! is_file($powershell)) {
+            $powershell = 'powershell.exe';
+        }
+
+        $processCheck = "Get-CimInstance Win32_Process -Filter \"Name = 'php.exe' OR Name = 'php-cgi.exe'\" | Where-Object { \$_.CommandLine -match 'artisan(\\.php)?\\s+queue:work\\s+database' -and \$_.CommandLine -match '--queue=sicoes' } | Select-Object -First 1";
+        $check = Process::run([
+            $powershell,
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            $processCheck,
+        ]);
+
+        if ($check->successful() && trim($check->output()) !== '') {
+            return;
+        }
+
+        $command = 'Start-Process -FilePath '. $this->powershellLiteral($php)
+            .' -ArgumentList @('.$this->powershellLiteral($artisan)
+            .',\'queue:work\',\'database\',\'--queue=sicoes,default\',\'--sleep=3\',\'--tries=135\',\'--timeout=7500\',\'--no-interaction\')'
+            .' -WorkingDirectory '.$this->powershellLiteral(base_path())
+            .' -WindowStyle Hidden -PassThru | Select-Object -ExpandProperty Id';
+
+        $started = Process::run([
+            $powershell,
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            $command,
+        ]);
+
+        if (! $started->successful()) {
+            Log::error('PowerShell rechazó iniciar el worker SICOES.', [
+                'php_binary' => $php,
+                'exit_code' => $started->exitCode(),
+                'stderr' => SensitiveDataSanitizer::text($started->errorOutput(), 500),
+                'stdout' => SensitiveDataSanitizer::text($started->output(), 200),
+            ]);
+
+            throw new \RuntimeException('No se pudo iniciar automáticamente el worker de la cola SICOES.');
+        }
+    }
+
+    private function powershellLiteral(string $value): string
+    {
+        return "'".str_replace("'", "''", $value)."'";
     }
 
     public function refreshSicoesProgress(): void

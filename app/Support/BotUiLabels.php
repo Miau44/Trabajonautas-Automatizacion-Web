@@ -142,6 +142,7 @@ final class BotUiLabels
             'normalizada' => 'Coincidencia normalizada',
             'aproximada' => 'Coincidencia aproximada',
             'expansion_area_afin' => 'Carrera afín agregada',
+            'expansion_area_amplia' => 'Expansion de area amplia',
             default => 'Coincidencia automática',
         };
     }

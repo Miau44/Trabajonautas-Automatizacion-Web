@@ -12,6 +12,6 @@ return [
     'affinity_expansion_exclusion_anchor_professions' => [
         'Ingeniería de Alimentos',
     ],
-    'classifier_version' => env('PROFESSION_CLASSIFIER_VERSION', 'profession-catalog-v5'),
+    'classifier_version' => env('PROFESSION_CLASSIFIER_VERSION', 'profession-catalog-v6-broad-areas'),
     'prompt_version' => env('EVALUAR_PROFESSION_PROMPT_VERSION', 'evaluar-professions-v4'),
 ];

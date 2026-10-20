@@ -223,7 +223,7 @@ Reglas criticas:
 - No inventes datos. Si falta informacion usa cadenas vacias, arreglos vacios o el tipo no_especificada.
 - Devuelve solo JSON valido. No markdown, no explicaciones fuera del JSON.
 - Prioriza precision sobre cantidad.
-- Extrae unicamente profesiones, carreras, especialidades o titulos academicos mencionados explicitamente como requisito de formacion.
+- Extrae profesiones, carreras y especialidades que sirvan para clasificar la convocatoria. No registres grados academicos generales como Magister, Maestria, Doctorado, Licenciatura, Tecnico Superior o Diplomado como profesiones; son requisitos de nivel y deben quedar en la evidencia del cargo.
 - No devuelvas IDs de areas ni profesiones. Los IDs se resolveran exclusivamente en MySQL.
 - nombre_catalogo solo puede copiar literalmente una profesion del catalogo proporcionado. Si no hay coincidencia segura, dejalo vacio y conserva nombre_original.
 - No agregues profesiones relacionadas que no esten escritas. Si aparece "carreras afines", activa acepta_carreras_afines, conserva su evidencia y no inventes carreras adicionales.
@@ -369,8 +369,8 @@ Clasificacion obligatoria:
 
 Reglas de datos:
 - CUCE: extrae del documento solo si aparece explicitamente. La fila SICOES es la fuente primaria y Laravel comparara ambos valores.
-- Profesiones: conserva nombre_original exactamente como aparece y una evidencia que contenga ese requisito. nombre_catalogo debe ser un nombre literal del catalogo o una cadena vacia.
-- Cargos: si hay varios cargos realmente diferentes, incluye en cada cargo las profesiones que lo habilitan usando exactamente sus valores nombre_original. Una lista de profesiones alternativas para un mismo cargo no convierte esas profesiones en cargos separados.
+- Profesiones: conserva nombre_original exactamente como aparece y una evidencia que contenga ese requisito. nombre_catalogo debe ser un nombre literal del catalogo o una cadena vacia. Si se exige un grado como Magister/Doctor en un area amplia, registra el area como profesion detectable y conserva el grado solo en cargos/evidencia.
+- Cargos: si hay varios cargos realmente diferentes, incluye en cada cargo las profesiones o areas de conocimiento que lo habilitan usando exactamente sus valores nombre_original. Copia tambien las carreras/areas de cada cargo en profesiones_encontradas; no dejes esa lista vacia cuando el documento enumere areas amplias. Una lista de profesiones alternativas para un mismo cargo no convierte esas profesiones en cargos separados.
 - tipo_requisito debe ser obligatoria, alternativa o deseable. confianza debe estar entre 0 y 1.
 - No dupliques una profesion equivalente; conserva la evidencia mas clara.
 - Si aparece "carreras afines" o equivalente, activa acepta_carreras_afines y copia la frase en evidencia_carreras_afines. No agregues por tu cuenta todas las profesiones del area.

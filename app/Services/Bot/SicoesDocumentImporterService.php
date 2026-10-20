@@ -25,7 +25,7 @@ class SicoesDocumentImporterService
 {
     private const ANALYSIS_SCHEMA_VERSION = 'sicoes-document-v4-2026-08-31';
 
-    private const PROMPT_VERSION = 'sicoes-professions-multiarea-v3-2026-08-31';
+    private const PROMPT_VERSION = 'sicoes-professions-broad-areas-v4-2026-10-20';
 
     public function __construct(
         private SicoesDocumentAiAnalyzer $analyzer,
@@ -424,6 +424,28 @@ class SicoesDocumentImporterService
         $detectedProfessions = is_array($data['profesiones_encontradas'] ?? null)
             ? $data['profesiones_encontradas']
             : [];
+        $roleProfessions = collect((array) ($data['cargos'] ?? []))
+            ->filter(fn (mixed $role): bool => is_array($role))
+            ->flatMap(fn (array $role): array => collect((array) ($role['profesiones'] ?? []))
+                ->filter(fn (mixed $name): bool => is_string($name) && trim($name) !== '')
+                ->map(fn (string $name): array => [
+                    'nombre_original' => trim($name),
+                    'evidencia' => trim((string) ($role['evidencia'] ?? $role['nombre'] ?? $name)),
+                    'tipo_requisito' => 'alternativa',
+                    'confianza' => 1.0,
+                ])
+                ->all())
+            ->all();
+        $detectedProfessions = [...$detectedProfessions, ...$roleProfessions];
+        $primaryArea = trim((string) ($data['area_principal_catalogo'] ?? ''));
+        if ($primaryArea !== '') {
+            $detectedProfessions[] = [
+                'nombre_original' => $primaryArea,
+                'evidencia' => trim((string) ($data['evidencia_area_principal'] ?? $primaryArea)),
+                'tipo_requisito' => 'alternativa',
+                'confianza' => (float) ($data['confianza_area_principal'] ?? 1.0),
+            ];
+        }
         $professionResolution = $this->professionAssignments->resolveDetectedProfessions(
             $detectedProfessions,
             (bool) ($data['acepta_carreras_afines'] ?? false),
@@ -574,6 +596,8 @@ class SicoesDocumentImporterService
                 'profesiones_resueltas' => $professionResolution['profesiones_resueltas'] ?? [],
                 'profesiones_no_identificadas' => $professionResolution['profesiones_no_identificadas'] ?? [],
                 'profesiones_ambiguas' => $professionResolution['profesiones_ambiguas'] ?? [],
+                'grados_academicos_ignorados' => $professionResolution['grados_academicos_ignorados'] ?? [],
+                'areas_amplias_detectadas' => $professionResolution['areas_amplias_detectadas'] ?? [],
                 'areas_detectadas' => $professionResolution['areas_detectadas'] ?? [],
                 'area_principal' => [
                     'nombre_catalogo' => $data['area_principal_catalogo'] ?? null,
