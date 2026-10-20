@@ -481,6 +481,10 @@ PROMPT;
 
     private function normalizeResponse(array $data): array
     {
+        $data['profesiones_encontradas'] = $this->deduplicateProfessions(
+            is_array($data['profesiones_encontradas'] ?? null) ? $data['profesiones_encontradas'] : [],
+        );
+
         $location = is_array($data['lugar_trabajo'] ?? null) ? $data['lugar_trabajo'] : [];
         $duration = is_array($data['duracion_contrato'] ?? null) ? $data['duracion_contrato'] : [];
         $modality = is_array($data['modalidad_postulacion'] ?? null) ? $data['modalidad_postulacion'] : [];
@@ -545,6 +549,35 @@ PROMPT;
         ];
     }
 
+    private function deduplicateProfessions(array $professions): array
+    {
+        $seen = [];
+        $unique = [];
+
+        foreach ($professions as $profession) {
+            if (! is_array($profession)) {
+                $unique[] = $profession;
+                continue;
+            }
+
+            $catalogName = trim((string) ($profession['nombre_catalogo'] ?? ''));
+            $originalName = trim((string) ($profession['nombre_original'] ?? ''));
+            $key = $this->normalize($catalogName !== '' ? $catalogName : $originalName);
+
+            if ($key !== '' && isset($seen[$key])) {
+                continue;
+            }
+
+            if ($key !== '') {
+                $seen[$key] = true;
+            }
+
+            $unique[] = $profession;
+        }
+
+        return $unique;
+    }
+
     private function hasRequiredShape(array $data): bool
     {
         return $this->validationErrors($data) === [];
@@ -601,7 +634,6 @@ PROMPT;
             $errors[] = 'motivo_descarte debe ser texto o null.';
         }
 
-        $professionKeys = [];
         $officialProfessionNames = Schema::hasTable('profesions')
             ? Profesion::query()->pluck('profesion_name')->all()
             : [];
@@ -637,13 +669,7 @@ PROMPT;
                 $errors[] = "profesiones_encontradas.{$index}.nombre_catalogo no pertenece al catálogo autorizado.";
             }
 
-            $deduplicationKey = $this->normalize(
-                $catalogName !== '' ? $catalogName : (string) ($profession['nombre_original'] ?? ''),
-            );
-            if ($deduplicationKey !== '' && in_array($deduplicationKey, $professionKeys, true)) {
-                $errors[] = "profesiones_encontradas.{$index} duplica una profesión anterior.";
-            }
-            $professionKeys[] = $deduplicationKey;
+            // Duplicate catalog mappings are collapsed during normalization.
         }
 
         foreach ([
