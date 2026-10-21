@@ -253,6 +253,8 @@ PROMPT;
         }
 
         $professions = Profesion::query()
+            ->where('site_catalog_active', true)
+            ->whereHas('areas', fn ($query) => $query->where('areas.site_catalog_active', true))
             ->with($relations)
             ->orderBy('id')
             ->get(['id', 'profesion_name'])
@@ -635,7 +637,7 @@ PROMPT;
         }
 
         $officialProfessionNames = Schema::hasTable('profesions')
-            ? Profesion::query()->pluck('profesion_name')->all()
+            ? Profesion::query()->where('site_catalog_active', true)->pluck('profesion_name')->all()
             : [];
 
         foreach ((array) ($data['profesiones_encontradas'] ?? []) as $index => $profession) {
@@ -707,7 +709,7 @@ PROMPT;
         if (
             $areaName !== ''
             && Schema::hasTable('areas')
-            && ! Area::query()->where('area_name', $areaName)->exists()
+            && ! Area::query()->where('site_catalog_active', true)->where('area_name', $areaName)->exists()
         ) {
             $errors[] = 'area_principal_catalogo no pertenece al catálogo autorizado.';
         }

@@ -274,7 +274,7 @@ class BotPreview extends Component
 
     public function professionsForArea(int $areaId, ProfessionAssignmentService $service): array
     {
-        abort_unless(Area::query()->whereKey($areaId)->exists(), 404);
+        abort_unless(Area::query()->where('site_catalog_active', true)->whereKey($areaId)->exists(), 404);
 
         return $service->resolve([$areaId])['profession_ids'];
     }
@@ -323,9 +323,11 @@ class BotPreview extends Component
         $normalizedFields['location_detected_text'] = $locationSelection['location'];
         $attachments = $this->storePreviewAttachments($preview);
         $selectedAreaName = Area::query()
+            ->where('site_catalog_active', true)
             ->whereKey($this->form['selected_area_id'])
             ->value('area_name');
         $selectedProfessionNames = Profesion::query()
+            ->where('site_catalog_active', true)
             ->whereIn('id', $this->form['selected_profession_ids'])
             ->orderBy('profesion_name')
             ->pluck('profesion_name')
@@ -659,13 +661,12 @@ class BotPreview extends Component
             'scheduled_at' => null,
         ];
 
-        $professionNames = Profesion::query()->whereIn('id', $professionIds)->pluck('profesion_name')->all();
         $locationNames = Location::query()->whereIn('id', $locationIds)->pluck('location_name')->all();
 
         return app(SiteAnnouncementPublisher::class)->publish(
             preview: $preview,
             company: $company,
-            professionNames: $professionNames,
+            professionIds: $professionIds,
             locationNames: $locationNames,
             announcement: $data,
         );
@@ -751,8 +752,9 @@ class BotPreview extends Component
         }
 
         $compatibleIds = Profesion::query()
+            ->where('profesions.site_catalog_active', true)
             ->whereIn('id', $professionIds)
-            ->whereHas('areas', fn ($query) => $query->where('areas.id', $areaId))
+            ->whereHas('areas', fn ($query) => $query->where('areas.site_catalog_active', true)->where('areas.id', $areaId))
             ->pluck('id')
             ->map(fn ($id): int => (int) $id);
         $incompatibleIds = $professionIds->diff($compatibleIds)->values();
@@ -766,6 +768,7 @@ class BotPreview extends Component
             }
 
             $names = Profesion::query()
+                ->where('site_catalog_active', true)
                 ->whereIn('id', $incompatibleIds)
                 ->pluck('profesion_name')
                 ->implode(', ');
@@ -792,14 +795,14 @@ class BotPreview extends Component
         ])->map(fn ($id): int => (int) $id)->filter();
 
         foreach ($storedCandidates as $areaId) {
-            if (Area::query()->whereKey($areaId)->exists()) {
+            if (Area::query()->where('site_catalog_active', true)->whereKey($areaId)->exists()) {
                 return $areaId;
             }
         }
 
         $aiAreaName = trim((string) data_get($rawData, 'ai_analysis.area_principal_catalogo'));
         if ($aiAreaName !== '') {
-            $aiArea = Area::query()->get(['id', 'area_name'])->first(
+            $aiArea = Area::query()->where('site_catalog_active', true)->get(['id', 'area_name'])->first(
                 fn (Area $area): bool => $this->normalize($area->area_name) === $this->normalize($aiAreaName),
             );
 
@@ -809,7 +812,7 @@ class BotPreview extends Component
         }
 
         $fallbackAreaId = $resolvedAreaIds->first(
-            fn (int $areaId): bool => Area::query()->whereKey($areaId)->exists(),
+            fn (int $areaId): bool => Area::query()->where('site_catalog_active', true)->whereKey($areaId)->exists(),
         );
 
         return $fallbackAreaId ? (int) $fallbackAreaId : null;
@@ -832,8 +835,9 @@ class BotPreview extends Component
             ->unique()
             ->values();
         $compatibleCount = Profesion::query()
+            ->where('profesions.site_catalog_active', true)
             ->whereIn('id', $professionIds)
-            ->whereHas('areas', fn ($query) => $query->where('areas.id', $areaId))
+            ->whereHas('areas', fn ($query) => $query->where('areas.site_catalog_active', true)->where('areas.id', $areaId))
             ->count();
 
         if ($compatibleCount !== $professionIds->count()) {
@@ -917,7 +921,7 @@ class BotPreview extends Component
             || ! $preview->selected_company_id
             || ! Company::query()->whereKey($preview->selected_company_id)->exists()
             || $professionIds->isEmpty()
-            || Profesion::query()->whereIn('id', $professionIds)->count() !== $professionIds->count()
+            || Profesion::query()->where('site_catalog_active', true)->whereIn('id', $professionIds)->count() !== $professionIds->count()
             || $locationIds->isEmpty()
             || Location::query()->whereIn('id', $locationIds)->get()
                 ->reject(fn (Location $location): bool => $this->normalize($location->location_name) === 'no especificado')
@@ -1322,6 +1326,7 @@ class BotPreview extends Component
         }
 
         return $query
+            ->with('selectedCompany')
             ->whereIn('status', ['preview', 'edited', 'error'])
             ->where(function ($query) {
                 $query
@@ -1486,7 +1491,9 @@ class BotPreview extends Component
     public function profesions(): array
     {
         $catalog = Cache::remember('profesions_with_areas', 86400, function () {
-            return Profesion::query()->whereHas('areas')->with('areas')->get()->map(function ($p) {
+            return Profesion::query()->where('site_catalog_active', true)
+                ->whereHas('areas', fn ($query) => $query->where('areas.site_catalog_active', true))
+                ->with('areas')->get()->map(function ($p) {
                 return [
                     'id' => (int) $p->id,
                     'profesion_name' => $p->profesion_name,
@@ -1521,7 +1528,10 @@ class BotPreview extends Component
     #[Computed]
     public function areas()
     {
-        return Cache::remember('areas', 86400, fn () => Area::all(['id', 'area_name']));
+        return Cache::remember('areas', 86400, fn () => Area::query()
+            ->where('site_catalog_active', true)
+            ->orderBy('area_name')
+            ->get(['id', 'area_name']));
     }
 
     #[Computed]

@@ -20,6 +20,7 @@ class ProfessionAssignmentService
     public function catalog(): array
     {
         return Area::query()
+            ->where('site_catalog_active', true)
             ->orderBy('id')
             ->get(['id', 'area_name'])
             ->map(fn (Area $area): array => [
@@ -218,7 +219,7 @@ class ProfessionAssignmentService
 
         foreach ($broadAreaEvidence as $broadEvidence) {
             foreach ($broadEvidence['reglas'] as $rule) {
-                $areas = Area::query()->orderBy('id')->get(['id', 'area_name'])
+                $areas = Area::query()->where('site_catalog_active', true)->orderBy('id')->get(['id', 'area_name'])
                     ->filter(fn (Area $area): bool => $this->areaMatchesBroadRule($area->area_name, $rule));
 
                 foreach ($areas as $area) {
@@ -278,7 +279,7 @@ class ProfessionAssignmentService
         $aiPrimaryAreaConfidence = $this->confidence($aiPrimaryAreaConfidence);
 
         if ($aiPrimaryAreaName !== '') {
-            $area = Area::query()->where('area_name', $aiPrimaryAreaName)->first(['id', 'area_name']);
+            $area = Area::query()->where('site_catalog_active', true)->where('area_name', $aiPrimaryAreaName)->first(['id', 'area_name']);
             $hasResolvedProfessionInArea = $area && collect($resolved)->contains(
                 fn (array $profession): bool => in_array(
                     (int) $area->id,
@@ -325,6 +326,7 @@ class ProfessionAssignmentService
                 $reviewReasons[] = 'Se mencionan carreras afines, pero no se pudo seleccionar un área principal para expandir.';
             } else {
                 $areasForExpansion = Area::query()
+                    ->where('site_catalog_active', true)
                     ->whereKey((int) $selectedArea['area_id'])
                     ->get(['id', 'area_name']);
                 $excludedAreaIds = $this->affinityExpansionExcludedAreaIds($catalog);
@@ -605,12 +607,12 @@ class ProfessionAssignmentService
     {
         $parts = [
             'areas' => [
-                'count' => Area::query()->count(),
-                'updated' => Area::query()->max('updated_at'),
+                'count' => Area::query()->where('site_catalog_active', true)->count(),
+                'updated' => Area::query()->where('site_catalog_active', true)->max('updated_at'),
             ],
             'professions' => [
-                'count' => Profesion::query()->count(),
-                'updated' => Profesion::query()->max('updated_at'),
+                'count' => Profesion::query()->where('site_catalog_active', true)->count(),
+                'updated' => Profesion::query()->where('site_catalog_active', true)->max('updated_at'),
             ],
             'relations' => [
                 'count' => DB::table('area_profesion')->count(),
@@ -651,6 +653,7 @@ class ProfessionAssignmentService
             ->values();
 
         $areas = Area::query()
+            ->where('site_catalog_active', true)
             ->whereIn('id', $areaIds)
             ->orderBy('id')
             ->get(['id', 'area_name']);
@@ -660,7 +663,7 @@ class ProfessionAssignmentService
 
         $professionIds = $valid ? $this->professionIdsForAreaIds($resolvedAreaIds->all()) : [];
         $professions = $professionIds
-            ? Profesion::query()->whereIn('id', $professionIds)->orderBy('id')->get(['id', 'profesion_name'])
+            ? Profesion::query()->where('site_catalog_active', true)->whereIn('id', $professionIds)->orderBy('id')->get(['id', 'profesion_name'])
             : collect();
 
         return [
@@ -684,6 +687,7 @@ class ProfessionAssignmentService
             ->unique(fn (string $name): string => $this->normalize($name))
             ->values();
         $catalog = Area::query()
+            ->where('site_catalog_active', true)
             ->get(['id', 'area_name'])
             ->keyBy(fn (Area $area): string => $this->normalize($area->area_name));
         $resolvedIds = [];
@@ -726,8 +730,9 @@ class ProfessionAssignmentService
         }
 
         return Profesion::query()
+            ->where('site_catalog_active', true)
             ->whereHas('areas', function ($query) use ($areaIds): void {
-                $query->whereIn('areas.id', $areaIds);
+                $query->where('areas.site_catalog_active', true)->whereIn('areas.id', $areaIds);
             })
             ->distinct()
             ->orderBy('profesions.id')
@@ -820,6 +825,7 @@ class ProfessionAssignmentService
         }
 
         return Profesion::query()
+            ->where('site_catalog_active', true)
             ->with($relations)
             ->orderBy('id')
             ->get(['id', 'profesion_name'])

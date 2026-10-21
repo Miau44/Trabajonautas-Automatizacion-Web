@@ -10,6 +10,7 @@ use App\Models\CompanyType;
 use App\Models\SicoesScrapeBatch;
 use App\Models\SicoesScrapeBatchItem;
 use App\Services\ProfessionAssignmentService;
+use App\Services\SiteProfessionCatalogSynchronizer;
 use App\Support\BotUiLabels;
 use App\Support\SensitiveDataSanitizer;
 use Carbon\Carbon;
@@ -23,12 +24,13 @@ use Symfony\Component\Process\Process;
 
 class SicoesDocumentImporterService
 {
-    private const ANALYSIS_SCHEMA_VERSION = 'sicoes-document-v4-2026-08-31';
+    private const ANALYSIS_SCHEMA_VERSION = 'sicoes-document-v5-web-catalog-2026-10-21';
 
-    private const PROMPT_VERSION = 'sicoes-professions-broad-areas-v4-2026-10-20';
+    private const PROMPT_VERSION = 'sicoes-professions-web-catalog-v5-2026-10-21';
 
     public function __construct(
         private SicoesDocumentAiAnalyzer $analyzer,
+        private SiteProfessionCatalogSynchronizer $siteProfessionCatalog,
         private SicoesDocumentEligibilityClassifier $eligibilityClassifier,
         private ProfessionAssignmentService $professionAssignments,
         private SicoesLocationResolver $locationResolver,
@@ -42,6 +44,9 @@ class SicoesDocumentImporterService
         ?string $batchId = null,
         ?callable $onProgress = null,
     ): array {
+        $catalogSync = $this->siteProfessionCatalog->sync();
+        Log::info('SICOES sincronizó el catálogo de áreas y profesiones de la web.', $catalogSync);
+
         $botCompany = BotCompany::findOrFail($botCompanyId);
         $slug = $this->dateSlug($run['slug'] ?? $run['date'] ?? null);
         $basePath = $this->basePath($run);
