@@ -16,7 +16,7 @@ class SiteAnnouncementPublisher
      * Publish one reviewed local preview to the website database.
      * Local preview tables are deliberately never queried through the site connection.
      *
-     * @param  array<int, string>  $professionNames
+     * @param  array<int, int>  $professionIds
      * @param  array<int, string>  $locationNames
      * @param  array<string, mixed>  $announcement
      * @return array{id: int, created: bool, attachment_count: int}
@@ -24,7 +24,7 @@ class SiteAnnouncementPublisher
     public function publish(
         BotVacancyPreview $preview,
         Company $company,
-        array $professionNames,
+        array $professionIds,
         array $locationNames,
         array $announcement,
     ): array {
@@ -54,7 +54,17 @@ class SiteAnnouncementPublisher
         }
 
         $sourceHash = hash('sha256', $sourceUrl);
-        $professionIds = $this->mapCatalogIds($db, 'profesions', 'profesion_name', $professionNames, 'profesión');
+        $professionIds = collect($professionIds)
+            ->map(fn (mixed $id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+        $validProfessionIds = $db->table('profesions')->whereIn('id', $professionIds)->pluck('id')
+            ->map(fn ($id): int => (int) $id)->all();
+        if ($professionIds === [] || count($validProfessionIds) !== count($professionIds)) {
+            throw new RuntimeException('La selección contiene IDs de profesión que no existen en el catálogo web. Sincroniza el catálogo antes de publicar.');
+        }
         $locationIds = $this->mapCatalogIds($db, 'locations', 'location_name', $locationNames, 'ubicación');
         return $db->transaction(function () use (
             $db,
