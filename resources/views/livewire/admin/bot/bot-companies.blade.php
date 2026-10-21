@@ -318,21 +318,23 @@
                     <div class="min-w-0" wire:loading.class="opacity-60" wire:target="search,sort,statusFilter,categoryFilter,perPage,goToCompaniesPage,previousCompaniesPage,nextCompaniesPage">
                         <div class="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
                             @forelse ($companies as $company)
+                                @php($companyLogoUrl = $company->websiteLogoUrl())
+                                @php($companyDisplayName = $company->websiteCompanyName())
                                 <article wire:key="bot-company-{{ $company->id }}"
                                     class="group flex min-h-[310px] flex-col rounded-[2rem] border border-slate-200 bg-gradient-to-br from-white via-white to-slate-50 p-5 shadow-xl shadow-slate-200/70 transition duration-200 hover:-translate-y-1 hover:border-orange-300 hover:shadow-orange-100 dark:border-white/10 dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 dark:shadow-black/20 dark:hover:border-orange-400/40 dark:hover:shadow-orange-950/30">
                                     <div class="flex items-start justify-between gap-4">
                                         <div class="flex items-start gap-4">
-                                            @if ($company->hasLogoFile())
-                                                <img src="{{ $company->logoUrl() }}" alt="{{ $company->name }}"
-                                                    class="h-16 w-16 rounded-2xl border border-slate-200 bg-white object-cover shadow-inner dark:border-white/10">
+                                            @if ($companyLogoUrl)
+                                                <img src="{{ $companyLogoUrl }}" alt="{{ $companyDisplayName }}"
+                                                    class="h-16 w-16 rounded-2xl border border-slate-200 bg-white object-contain p-1 shadow-inner dark:border-white/10">
                                             @else
                                                 <div
                                                     class="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-red-500 text-2xl font-black text-white shadow-lg shadow-orange-200 dark:shadow-orange-950/30">
-                                                    {{ \Illuminate\Support\Str::substr($company->name, 0, 1) }}
+                                                    {{ \Illuminate\Support\Str::substr($companyDisplayName, 0, 1) }}
                                                 </div>
                                             @endif
                                             <div class="min-w-0">
-                                                <h2 class="line-clamp-2 font-black leading-5 text-slate-950 dark:text-white">{{ $company->name }}</h2>
+                                                <h2 class="line-clamp-2 font-black leading-5 text-slate-950 dark:text-white">{{ $companyDisplayName }}</h2>
                                                 <p class="mt-2 break-all text-xs font-semibold leading-5 text-slate-500 dark:text-slate-400">{{ $company->evaluar_url }}</p>
                                             </div>
                                         </div>

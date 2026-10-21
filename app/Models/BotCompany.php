@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class BotCompany extends Model
@@ -32,6 +34,54 @@ class BotCompany extends Model
     public function logoUrl(): ?string
     {
         return StoragePath::url($this->resolveLogoPath());
+    }
+
+    public function websiteLogoUrl(): ?string
+    {
+        $company = $this->websiteCompany();
+
+        $path = StoragePath::normalizePublicPath($company?->company_image);
+
+        if (! $path || $this->isPlaceholderLogo($path)) {
+            return null;
+        }
+
+        return 'https://trabajonautas.com/storage/'.implode('/', array_map('rawurlencode', explode('/', $path)));
+    }
+
+    public function websiteCompanyName(): string
+    {
+        return (string) ($this->websiteCompany()?->company_name ?: $this->name);
+    }
+
+    private function websiteCompany(): ?object
+    {
+        try {
+            $companies = Cache::remember('site_company_logos_v1', now()->addMinutes(30), fn () =>
+                DB::connection('site')->table('companies')
+                    ->whereNull('deleted_at')
+                    ->get(['company_name', 'company_image'])
+            );
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $aliases = $this->websiteLogoAliases();
+        $company = $companies->first(fn ($candidate) =>
+            in_array($this->normalizeName((string) $candidate->company_name), $aliases, true)
+        );
+
+        return $company ?: $companies->first(function ($candidate) use ($aliases): bool {
+            $candidateName = $this->normalizeName((string) $candidate->company_name);
+
+            foreach ($aliases as $alias) {
+                if (strlen($alias) >= 3 && preg_match('/(?:^|\s)'.preg_quote($alias, '/').'(?:$|\s)/', $candidateName) === 1) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
     }
 
     public function getLogoUrlAttribute(): ?string
@@ -95,6 +145,37 @@ class BotCompany extends Model
         ][$this->name] ?? [$this->name];
 
         return collect([...$aliases, $this->name])
+            ->map(fn (string $alias) => $this->normalizeName($alias))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function websiteLogoAliases(): array
+    {
+        $aliases = [
+            'BCP' => ['bcp', 'banco de credito de bolivia', 'banco de credito'],
+            'BNB' => ['bnb', 'banco nacional de bolivia'],
+            'BANCO BDP' => ['banco bdp', 'bdp', 'banco de desarrollo productivo'],
+            'BANCO FORTALEZA' => ['banco fortaleza', 'fortaleza'],
+            'BAGO' => ['bago', 'laboratorios bago'],
+            'EMBOL' => ['embol', 'embotelladoras bolivianas unidas'],
+            'UNIFRANZ' => ['unifranz', 'universidad privada franz tamayo'],
+            'GRUPO KANTUTANI' => ['grupo kantutani', 'kantutani'],
+            'COFAR' => ['cofar', 'laboratorios cofar'],
+            'COMPANIA DE ALIMENTOS' => ['compania de alimentos', 'cal'],
+            'DATEC' => ['datec', 'datec ltd'],
+            'LA BOLIVIANA CIACRUZ' => ['la boliviana ciacruz', 'boliviana ciacruz', 'lbc'],
+            'LAFAR' => ['lafar', 'laboratorios lafar'],
+            'SOFIA LTDA' => ['sofia ltda', 'sofia', 'procesadora de alimentos sofia'],
+            'YPFB REFINACION' => ['ypfb refinacion', 'ypfb refinacion sa'],
+            'CREDINFORM' => ['credinform', 'credinform international'],
+            'BBO BEBIDAS BOLIVIANAS' => ['bbo bebidas bolivianas', 'bebidas bolivianas bbo', 'bbo'],
+            'TOTTO BOLIVIA' => ['totto bolivia', 'totto'],
+        ][Str::of($this->name)->ascii()->upper()->toString()] ?? [];
+
+        return collect([...$this->logoAliases(), ...$aliases, $this->name])
             ->map(fn (string $alias) => $this->normalizeName($alias))
             ->filter()
             ->unique()
