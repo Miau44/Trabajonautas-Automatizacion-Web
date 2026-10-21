@@ -76,6 +76,7 @@ class ProcessSicoesJob implements ShouldQueue
         public string $sourceType = SicoesScrapeBatch::SOURCE_CONSULTING,
     ) {
         $this->retryUntilAt = new \DateTimeImmutable('+'.self::RETRY_WINDOW_HOURS.' hours');
+        $this->onQueue('sicoes');
     }
 
     public function retryUntil(): \DateTimeInterface

@@ -19,7 +19,6 @@ class Kernel extends ConsoleKernel
         // 1. Send email in queue when: Client is register completed and User/Admin verified account (PRO of PRO-MAX)
         // 2. Send Notifications to all users PRO-MAX if location and profesion is same at announcement
         $schedule->command('queue:restart')->everyFiveMinutes();
-        $schedule->command('queue:work --max-time=55 --stop-when-empty')->everyMinute();
         $schedule->command('queue:prune-failed --hours=168')->weekly(); // Clear failed_jobs after 3 trying times 
     }
 
