@@ -26,6 +26,11 @@ class BotVacancyPreview extends Model
         return $this->belongsTo(BotCompany::class);
     }
 
+    public function selectedCompany(): BelongsTo
+    {
+        return $this->belongsTo(Company::class, 'selected_company_id');
+    }
+
     public function announcement(): BelongsTo
     {
         return $this->belongsTo(Announcement::class, 'convocatoria_id');

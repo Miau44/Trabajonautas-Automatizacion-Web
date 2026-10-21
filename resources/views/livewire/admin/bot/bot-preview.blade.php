@@ -415,23 +415,19 @@
             @forelse ($previews as $preview)
                 @php
                     $previewIssues = \App\Support\BotUiLabels::previewIssues($preview->raw_data);
+                    $previewCompanyName = $preview->selectedCompany?->company_name ?: 'Empresa no identificada';
                 @endphp
                 <article
                     class="group flex min-h-[390px] flex-col justify-between rounded-[2rem] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/70 transition duration-200 hover:-translate-y-1 hover:border-orange-300 hover:shadow-orange-100 dark:border-white/10 dark:bg-slate-900/80 dark:shadow-black/20 dark:hover:border-orange-400/40 dark:hover:shadow-orange-950/30">
                     <div>
                         <div class="mb-5 flex items-start justify-between gap-4">
                             <div class="flex items-start gap-3">
-                            @if ($company->hasLogoFile())
-                                <img src="{{ $company->logoUrl() }}" alt="{{ $company->name }}"
-                                    class="h-14 w-14 rounded-2xl border border-slate-200 bg-white object-cover shadow-inner dark:border-white/10">
-                            @else
                                 <div
                                     class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-red-500 text-xl font-black text-white shadow-lg shadow-orange-200 dark:shadow-orange-950/30">
-                                    {{ \Illuminate\Support\Str::substr($company->name, 0, 1) }}
+                                    {{ \Illuminate\Support\Str::substr($previewCompanyName, 0, 1) }}
                                 </div>
-                            @endif
                             <div class="min-w-0">
-                                <p class="text-xs font-black uppercase tracking-wide text-tbn-primary">{{ $company->name }}</p>
+                                <p class="text-xs font-black uppercase tracking-wide text-tbn-primary">{{ $previewCompanyName }}</p>
                                 <p class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
                                     <i class="mr-1 text-orange-500 fas fa-map-marker-alt"></i>
                                     {{ $preview->location ?: $preview->department ?: 'No especificado' }}

@@ -222,6 +222,7 @@ class SiteCompanyCatalogSynchronizer
             ['ende', 'empresa nacional de electricidad', 'empresa nacional de electricidad ende', 'ende empresa nacional de electricidad'],
             ['ucp paap', 'unidad coordinadora del programa de agua y alcantarillado periurbano', 'unidad coordinadora programa de agua y alcantarillado periurbano', 'ucp paap unidad coordinadora del programa de agua y alcantarillado periurbano', 'unidad coordinadora programa de agua y alcantarillado periurbano ucp paap'],
             ['hospital tercer nivel potosi', 'hospital de tercer nivel potosi fray giovanni eugenio natalini magnani'],
+            ['servicio departamental de gestion social potosi', 'sedeges potosi servicio departamental de gestion social'],
         ];
         foreach ($groups as $group) {
             $normalized = array_map(fn (string $name): string => $this->normalizeCompanyName($name), $group);
